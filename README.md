@@ -102,6 +102,14 @@ values) -- and states what it EXPECTS: `same` is a gate on an invariant, `differ
 mutant that goes unseen is the failure. `on_difference` picks what a broken claim is, the same two-way choice every
 other target makes: a build failure, or the target's own recorded outcome.
 
+Two lessons from the tool this replaces are built into the node rather than left to arrangement. A side NAMES the
+library it is supposed to be running (`binds`) and proves it: an editable install resolves its package through the
+install's path entry -- the canonical checkout -- so a side run from another worktree can import the very tree it is
+being compared against and agree with it perfectly, having compared nothing (measured, not hypothetical). The side
+refuses when its library resolved outside its own directory, and the comparison refuses two sides that resolved the
+same file. And a diff states the COUNT it needs (`minimum`): a comparison that compared less than it declared is a
+refusal, not a pass, because a gate that cannot run says so instead of reporting a verdict over whatever survived.
+
 The raw never leaves the workspace. A side's tensors live in the build cache, which is wipeable and swept; what the
 diff node outputs, and what a store target beside it would file, is the DIFF -- per cell and quantity the worst slot,
 where it is, what bound it, and how many slots were compared. A cell either side could not produce is not a comparison
