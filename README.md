@@ -6,7 +6,7 @@ carry it. It is a development dependency: nothing a user installs imports it.
 | Module | What it is |
 |---|---|
 | `rola_devtools.mirror` | the public mirror's export, run by each repository's commit gate and its mirror workflow |
-| `rola_devtools.cells` | the central cell registry: every input a RoLA measurement or test runs on (carry, layer, QKV), its draw, its seed and the regime it proves, named once; bases and the cells derived from them; each cell declarable as a build NODE whose output is its record |
+| `rola_devtools.cells` | the central cell registry: every input a RoLA measurement or test runs on (carry, layer, producer, QKV), its draw, its seed and the regime it proves, named once; bases and the cells derived from them; each cell declarable as a build NODE whose output is its record |
 | `rola_devtools.build` | the declared build system: targets declared by composable functions in files, keyed by what they read, cached or run in dependency order, holding the machine's resources, each in its own environment's worker |
 | `rola_devtools.timing` | the timing system, as targets: a server of entry workers, registrations of timed callables on cells, interleaved clock-locked sessions, memory passes, null gates |
 | `rola_devtools.diff` | the diff targets: two executors run over the same cells in the environments they name, compared under one rule (bit-identity, the per-slot clause rule, support equality), with a claim the build can fail on -- a difference expected or refused |
