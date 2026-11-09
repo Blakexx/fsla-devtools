@@ -19,10 +19,16 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 #: a local package's files that are a build's or a tool's leftovers, never its content
 SKIPPED = {"__pycache__", ".git", ".pytest_cache", ".ruff_cache"}
+
+
+def _leftover(name: str, at_root: bool) -> bool:
+    """A leftover anywhere, or a build's own folder or a Bazel output link at the package's root."""
+    return name in SKIPPED or name.endswith(".egg-info") or (at_root and (name == "build" or name.startswith("bazel-")))
 
 
 def _content(path: Path) -> bytes:
@@ -30,7 +36,7 @@ def _content(path: Path) -> bytes:
     digest = hashlib.sha256()
     for file in sorted(p for p in path.rglob("*") if p.is_file()):
         rel = file.relative_to(path)
-        if SKIPPED & set(rel.parts) or any(part.endswith(".egg-info") for part in rel.parts):
+        if any(_leftover(part, i == 0) for i, part in enumerate(rel.parts)):
             continue
         digest.update(str(rel).encode() + b"\0" + file.read_bytes() + b"\0")
     return digest.hexdigest().encode()
@@ -39,6 +45,21 @@ def _content(path: Path) -> bytes:
 def _identity(package: str) -> bytes:
     path = Path(package)
     return _content(path) if path.is_dir() else package.encode()
+
+
+def _install(uv: str, python: Path, package: str, uv_env: dict, scratch: Path) -> None:
+    """One package without its dependencies; a local directory from a copy of its content, so its build writes nothing
+    into the checkout it came from."""
+    if Path(package).is_dir():
+        root = str(Path(package))
+
+        def ignored(directory: str, names: list[str]) -> list[str]:
+            return [n for n in names if _leftover(n, directory == root)]
+
+        copy = scratch / Path(package).name
+        shutil.copytree(package, copy, ignore=ignored, symlinks=True)
+        package = str(copy)
+    subprocess.run([uv, "pip", "install", "--python", str(python), "--no-deps", package], env=uv_env, check=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -72,9 +93,9 @@ def main(argv: list[str] | None = None) -> int:
             subprocess.run([a.uv, "venv", "--python", a.python, str(env)], env=uv_env, check=True)
             subprocess.run([a.uv, "pip", "sync", "--python", str(python), "--require-hashes", str(a.lock), *index],
                            env=uv_env, check=True)
-            for package in a.package:
-                subprocess.run([a.uv, "pip", "install", "--python", str(python), "--no-deps", package], env=uv_env,
-                               check=True)
+            with tempfile.TemporaryDirectory(dir=a.store) as scratch:
+                for package in a.package:
+                    _install(a.uv, python, package, uv_env, Path(scratch))
             (env / ".complete").write_text(f"{uv_version}\n")
     probe = ("import json, sys, sysconfig; print(json.dumps({'site': sysconfig.get_paths()['purelib'], "
              "'include': sysconfig.get_paths()['include'], 'base': sys.base_prefix}))")

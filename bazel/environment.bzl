@@ -25,10 +25,20 @@ package(default_visibility = ["//visibility:public"])
 filegroup(name = "python", srcs = ["bin/python3"])
 """
 
+def _build(rctx, default):
+    """The repository's BUILD file: `build_file`'s text, else `build`'s, else `default`."""
+    if rctx.attr.build_file:
+        return rctx.read(rctx.attr.build_file)
+    return rctx.attr.build or default
+
 def _python_impl(rctx):
     pin = json.decode(rctx.read(rctx.attr.uv_pin))
+    index = rctx.attr.index
+    if rctx.attr.index_from:
+        index = json.decode(rctx.read(rctx.attr.index_from))[rctx.attr.index_field]
     #: the environment's inputs: a change to any of them is a new environment
-    for source in [rctx.attr.lock, rctx.attr.make_env] + rctx.attr.watch:
+    facts_inputs = ([rctx.attr.post] if rctx.attr.post else []) + rctx.attr.post_args
+    for source in [rctx.attr.lock, rctx.attr.make_env] + rctx.attr.watch + facts_inputs + ([rctx.attr.index_from] if rctx.attr.index_from else []):
         rctx.watch(rctx.path(source))
     for source in rctx.attr.watch_trees:
         rctx.watch_tree(rctx.path(source).dirname)
@@ -52,11 +62,11 @@ def _python_impl(rctx):
         "--lock",
         str(rctx.path(rctx.attr.lock)),
         "--index",
-        rctx.attr.index,
+        index,
     ]
     for package in packages:
         args += ["--package", package]
-    built = rctx.execute(args, timeout = 7200, quiet = False, environment = {"PYTHONPATH": str(rctx.path(rctx.attr._devtools).dirname)})
+    built = rctx.execute(args, timeout = 7200, quiet = False)
     if built.return_code != 0:
         fail("the environment's store build failed (rola_devtools.graph.make_env):\n" + built.stderr)
     paths = json.decode(built.stdout.strip().splitlines()[-1])
@@ -79,13 +89,15 @@ def _python_impl(rctx):
     #: the environment's own interpreter and tools by their store path: the path carries the environment's key, so a
     #: command naming it is keyed by the environment
     rctx.file("flags.bzl", facts + "VENV = %s\n" % json.encode(paths["venv"]))
-    rctx.file("BUILD.bazel", rctx.attr.build or _PYTHON_BUILD)
+    rctx.file("BUILD.bazel", _build(rctx, _PYTHON_BUILD))
 
 _python_attrs = {
     "lock": attr.label(mandatory = True, doc = "the hash-pinned lock (`uv pip compile --generate-hashes`)"),
     "uv": attr.label(mandatory = True, allow_single_file = True, doc = "the pinned uv the store is built with"),
     "uv_pin": attr.label(mandatory = True, doc = "uv's pin, whose `python` names the interpreter uv installs"),
     "index": attr.string(default = "", doc = "an extra index the lock's packages come from (a torch index)"),
+    "index_from": attr.label(allow_single_file = True, doc = "or a JSON file whose `index_field` names that index"),
+    "index_field": attr.string(default = "torch_index", doc = "the field of `index_from` that names the index"),
     "devtools": attr.bool(default = True, doc = "rola_devtools from this module's source, after the lock"),
     "packages": attr.string_list(doc = "requirements pinned by commit (`name @ git+URL@COMMIT`), after the lock"),
     "post": attr.label(doc = "a script the environment's interpreter runs, its output the facts flags.bzl opens with"),
@@ -94,6 +106,7 @@ _python_attrs = {
     "watch": attr.label_list(allow_files = True, doc = "the further files whose change is a new environment"),
     "watch_trees": attr.label_list(allow_files = True, doc = "files whose whole directory's change is a new environment"),
     "build": attr.string(doc = "the repository's BUILD file (the environment's interpreter alone by default)"),
+    "build_file": attr.label(allow_single_file = True, doc = "or a file holding it"),
 }
 
 _python_repo = repository_rule(
@@ -131,11 +144,12 @@ def _pinned_impl(rctx):
             fail("%s: %s's sha256 is %s, not the pin's %s" % (pin["name"], pin["binary_path"], digest, pin["binary_sha256"]))
         rctx.execute(["chmod", "0755", binary])
     #: the repository's BUILD file names the binary by its pin
-    rctx.file("BUILD.bazel", rctx.attr.build.replace("{binary}", pin["binary_path"]))
+    rctx.file("BUILD.bazel", _build(rctx, "").replace("{binary}", pin["binary_path"]))
 
 _pinned_attrs = {
     "pin": attr.label(mandatory = True, doc = "the pin: its release, digest and folder"),
-    "build": attr.string(mandatory = True, doc = "the repository's BUILD file, `{binary}` the pin's binary path"),
+    "build": attr.string(doc = "the repository's BUILD file, `{binary}` the pin's binary path"),
+    "build_file": attr.label(allow_single_file = True, doc = "or a file holding it"),
 }
 
 _pinned_repo = repository_rule(
@@ -218,13 +232,14 @@ def _cuda_toolkit_impl(rctx):
         _component(rctx, root, redist[component]["linux-x86_64"], folder, "LICENSE")
     for path in rctx.attr.delete:
         rctx.delete(path)
-    rctx.file("BUILD.bazel", rctx.attr.build)
+    rctx.file("BUILD.bazel", _build(rctx, ""))
 
 _cuda_toolkit_attrs = {
     "pin": attr.label(mandatory = True, doc = "the redistributable manifest by its digest, the components and links"),
     "beside": attr.string_dict(doc = "further components, each into the folder named"),
     "delete": attr.string_list(doc = "paths removed after the unpack"),
-    "build": attr.string(mandatory = True, doc = "the repository's BUILD file"),
+    "build": attr.string(doc = "the repository's BUILD file"),
+    "build_file": attr.label(allow_single_file = True, doc = "or a file holding it"),
 }
 
 _cuda_toolkit_repo = repository_rule(
