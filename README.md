@@ -206,6 +206,16 @@ runs, and holds the host budget around each build phase. `bazel --commit-gate` i
 | `host_cc`, `host_gpu` | the host C++ compiler's and the machine's devices' identities, which actions that depend on them are keyed on |
 | `tree` | the checkout's tracked files (`git ls-files`; the commit's index under the commit gate) |
 
+`python`, `pinned` and `cuda_toolkit` are REPRODUCIBLE repositories (`repo_metadata(reproducible = True)`: their result
+is fixed by their pins and the files they read), so Bazel unpacks each once into the repo contents cache
+(`host.build_cache`'s `repository/contents`) and every checkout's output base links it; `host_cc`, `host_gpu` and `tree`
+read the machine or the workspace and are made per checkout.
+
+**The environment store is bounded.** `host.store_max_gb` and `host.store_max_age_days` (the dev config) bound the store
+the `python` tag builds into: each environment build sweeps, under the store's lock, the environments idle past the age
+and the cached wheels nothing hardlinks, and, over the size, the oldest of them, never the environment it was asked for;
+a swept environment a checkout still names is rebuilt from the cache or the index.
+
 `pins/uv_pin.json` is the uv every workspace's environment is built by.
 
 **The generic rules** (`bazel/rules.bzl`): a check over the tracked tree (`tree_test`), a check of the commit

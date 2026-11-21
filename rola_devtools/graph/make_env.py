@@ -1,6 +1,14 @@
 """THE ENVIRONMENT'S STORE: a pinned Python and a lock's packages, built once a key into the store every checkout's graph
 on the machine shares, under a file lock -- a second builder of the same key waits and reuses it.
 
+The store is BOUNDED the way the disk cache is, by size and age (`--max-bytes`, `--max-age-days`; the dev config's
+`host.store_max_gb` and `host.store_max_age_days`, handed down by the front door): each run, under the lock, sweeps what
+no live environment holds. An environment is swept when idle (`.used`, stamped by every run that asks for it) past the
+age or, with the store over its size, oldest first; a cached wheel (uv's `archive-v0` entry) is held while an
+environment hardlinks a file of it and swept oldest first once nothing does. The environment this run
+asks for is never swept, so the bound is a floor of one environment's own size, and a sweep a checkout still needs
+costs a rebuild from uv's cache or the index, never a wrong result: the environment repository watches `.complete`.
+
 The lock's packages are installed hash-checked (`--require-hashes`); then each `--package`, without its dependencies
 (the lock carries them): a local directory, keyed by the content of its files, or a requirement pinned by commit
 (`name @ git+URL@COMMIT`, which has no hash to require), keyed by its text. A package builds apart from the
@@ -21,7 +29,9 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
+import time
 from pathlib import Path
 
 #: a local package's files that are a build's or a tool's leftovers, never its content
@@ -72,6 +82,98 @@ def _install(uv: str, python: Path, package: str, uv_env: dict, scratch: Path, i
                    check=True)
 
 
+#: the mark a run stamps on the environment it asks for: its last use
+USED = ".used"
+GIB = 1024**3
+DAY = 86400
+
+
+def _files(root: Path):
+    """Every file under `root` as its lstat, links not followed."""
+    for directory, _dirs, names in os.walk(root):
+        for name in names:
+            try:
+                yield os.lstat(os.path.join(directory, name))
+            except OSError:
+                continue
+
+
+def _size(root: Path) -> int:
+    """The bytes under `root`, a hardlinked file once."""
+    seen: set[tuple[int, int]] = set()
+    total = 0
+    for st in _files(root):
+        if (st.st_dev, st.st_ino) not in seen:
+            seen.add((st.st_dev, st.st_ino))
+            total += st.st_size
+    return total
+
+
+def _stamp(env: Path) -> float:
+    """When an environment was last asked for: its mark's time."""
+    return (env / USED).stat().st_mtime
+
+
+def _archives(store: Path) -> list[tuple[float, Path, bool]]:
+    """uv's cached wheels as (when cached, path, held): held while an environment hardlinks any file of it."""
+    found = []
+    for entry in sorted((store / "uv-cache" / "archive-v0").glob("*")):
+        if not entry.is_dir():
+            continue
+        stats = list(_files(entry))
+        newest = max([entry.stat().st_mtime] + [s.st_mtime for s in stats])
+        found.append((newest, entry, any(s.st_nlink > 1 for s in stats)))
+    return sorted(found)
+
+
+def sweep(store: Path, keep: Path, max_bytes: int | None, max_age_days: float | None, now: float | None = None) -> dict:
+    """The store's bound: sweep what no live environment holds, never `keep`'s. Returns what it removed and the bytes
+    left (the bound is a floor of `keep`'s own size: more left than `max_bytes` means nothing else could go)."""
+    now = time.time() if now is None else now
+    limit = None if max_age_days is None else now - max_age_days * DAY
+    gone: dict[str, list[str]] = {"environments": [], "wheels": []}
+    #: an environment no run has marked (one built before the bound) starts its idle clock now, not at its build
+    for env in (store / "venvs").glob("*"):
+        if env.is_dir() and not (env / USED).exists():
+            (env / USED).touch()
+            os.utime(env / USED, (now, now))
+
+    def idle() -> list[Path]:
+        return sorted((e for e in (store / "venvs").glob("*") if e.is_dir() and e != keep), key=_stamp)
+
+    def drop(path: Path, kind: str) -> None:
+        shutil.rmtree(path, ignore_errors=True)
+        gone[kind].append(path.name)
+
+    if limit is not None:
+        for env in idle():
+            if _stamp(env) < limit:
+                drop(env, "environments")
+        for newest, entry, held in _archives(store):
+            if not held and newest < limit:
+                drop(entry, "wheels")
+    if max_bytes is not None:
+        total = _size(store)
+        while total > max_bytes:
+            free = [(entry, newest) for newest, entry, held in _archives(store) if not held]
+            if free:
+                #: the oldest wheels, until the store fits
+                for entry, _newest in free:
+                    freed = _size(entry)
+                    drop(entry, "wheels")
+                    total -= freed
+                    if total <= max_bytes:
+                        break
+                continue
+            victims = idle()
+            if not victims:
+                break
+            #: nothing is free: the oldest idle environment, whose wheels are then free
+            drop(victims[0], "environments")
+            total = _size(store)
+    return {**gone, "bytes": _size(store)}
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--store", type=Path, required=True)
@@ -81,6 +183,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--index", default="", help="an extra index the lock's packages come from (a torch index)")
     ap.add_argument("--no-build-isolation", action="store_true",
                     help="build each package against the environment (its build imports a locked package)")
+    ap.add_argument("--max-bytes", type=int, help="the store's size bound, swept to on every run")
+    ap.add_argument("--max-age-days", type=float, help="an environment or wheel idle this long is swept")
     ap.add_argument("--package", action="append", default=[],
                     help="installed after the lock without its dependencies: a local directory, or a requirement "
                          "pinned by commit")
@@ -109,6 +213,12 @@ def main(argv: list[str] | None = None) -> int:
                 for package in a.package:
                     _install(a.uv, python, package, uv_env, Path(scratch), not a.no_build_isolation)
             (env / ".complete").write_text(f"{uv_version}\n")
+        (env / USED).touch()
+        if a.max_bytes is not None or a.max_age_days is not None:
+            swept = sweep(a.store, env, a.max_bytes, a.max_age_days)
+            if swept["environments"] or swept["wheels"] or (a.max_bytes is not None and swept["bytes"] > a.max_bytes):
+                print(f"store sweep: {len(swept['environments'])} environments and {len(swept['wheels'])} wheels "
+                      f"removed, {swept['bytes'] / GIB:.1f} GiB left", file=sys.stderr)
     probe = ("import json, sys, sysconfig; print(json.dumps({'site': sysconfig.get_paths()['purelib'], "
              "'include': sysconfig.get_paths()['include'], 'base': sys.base_prefix}))")
     paths = json.loads(subprocess.run([str(python), "-c", probe], capture_output=True, text=True, check=True).stdout)

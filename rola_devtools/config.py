@@ -49,6 +49,11 @@ MACHINE: dict[str, dict[str, Key]] = {
         "scratch": Key("path", "/tmp/rola", "the tools' scratch root; never read back as a record"),
         "build_cache": Key("path", "~/.cache/rola/build", "the build system's cache of completed targets and run "
                            "workspaces (rola_devtools.build); wipeable"),
+        "store_max_gb": Key("int", 20, "the environment store's size bound in GiB (uv's wheel cache and the venvs built "
+                            "from it, beside the build cache's `bazel/disk`, which rola's rc bounds): each environment build "
+                            "sweeps the wheels and environments no live environment holds, oldest first, "
+                            "down to it"),
+        "store_max_age_days": Key("int", 30, "an environment or cached wheel idle this many days is swept"),
         "tools_dir": Key("path", "~/.local/share/rola/tools", "where rola's `tools/dev.py init` installs pinned tools"),
         "windows_system32": Key("path?", None, "WSL only: the Windows System32 directory as mounted in Linux"),
         "wsl_lib": Key("path?", None, "WSL only: the Windows driver's Linux libraries (libdxcore, libcuda); the dev "

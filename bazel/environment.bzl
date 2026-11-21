@@ -12,6 +12,13 @@ hands it the workspace's own pins and files; nothing here names a workspace. Doc
     use_repo(environment, "env", "tree", "uv")
 """
 
+#: REPRODUCIBLE REPOSITORIES (`repo_metadata(reproducible = True)`): a repository whose content is fixed by its attributes
+#: and the files it reads -- a release by its digest (`pinned`, `cuda_toolkit`), an environment by its lock's key
+#: (`python`: the store's venv is the lock's and pins', the repository only links it) -- is unpacked once into Bazel's
+#: repo contents cache, which every workspace on the machine shares, and each output base links it. `host_cc`,
+#: `host_gpu` and `tree` are not: they read the machine's compiler, its devices and the workspace's git index, so each
+#: workspace makes its own.
+
 def _store(rctx):
     store = rctx.getenv("ROLA_GRAPH_STORE")
     if not store:
@@ -79,6 +86,10 @@ def _python_impl(rctx):
         args += ["--package", package]
     if not rctx.attr.isolated_builds:
         args.append("--no-build-isolation")
+    #: the store's bound, from the repository environment without recording it: a changed bound is not a new environment
+    for flag, name in (("--max-bytes", "ROLA_GRAPH_STORE_MAX_BYTES"), ("--max-age-days", "ROLA_GRAPH_STORE_MAX_AGE_DAYS")):
+        if rctx.os.environ.get(name):
+            args += [flag, rctx.os.environ[name]]
     built = rctx.execute(args, timeout = 7200, quiet = False)
     if built.return_code != 0:
         fail("the environment's store build failed (rola_devtools.graph.make_env):\n" + built.stderr)
@@ -86,6 +97,8 @@ def _python_impl(rctx):
     rctx.symlink(paths["site"], "site-packages")
     rctx.symlink(paths["include"], "python_include")
     rctx.symlink(paths["base"] + "/bin/python3", "bin/python3")
+    #: the repository is links into the store: a venv swept from the store (rola_devtools.graph.make_env) invalidates it
+    rctx.watch(paths["venv"] + "/.complete")
     facts = ""
     if rctx.attr.post:
         environment = {}
@@ -103,6 +116,7 @@ def _python_impl(rctx):
     #: command naming it is keyed by the environment
     rctx.file("flags.bzl", facts + "VENV = %s\n" % json.encode(paths["venv"]))
     rctx.file("BUILD.bazel", _build(rctx, _PYTHON_BUILD))
+    return rctx.repo_metadata(reproducible = True)
 
 #: what rola_devtools' install reads of its repository: the project file, the files it names, the package
 _DEVTOOLS_INSTALLS = ("pyproject.toml", "LICENSE", "README.md", "rola_devtools")
@@ -164,6 +178,7 @@ def _pinned_impl(rctx):
         rctx.execute(["chmod", "0755", binary])
     #: the repository's BUILD file names the binary by its pin
     rctx.file("BUILD.bazel", _build(rctx, "").replace("{binary}", pin["binary_path"]))
+    return rctx.repo_metadata(reproducible = True)
 
 _pinned_attrs = {
     "pin": attr.label(mandatory = True, doc = "the pin: its release, digest and folder"),
@@ -252,6 +267,7 @@ def _cuda_toolkit_impl(rctx):
     for path in rctx.attr.delete:
         rctx.delete(path)
     rctx.file("BUILD.bazel", _build(rctx, ""))
+    return rctx.repo_metadata(reproducible = True)
 
 _cuda_toolkit_attrs = {
     "pin": attr.label(mandatory = True, doc = "the redistributable manifest by its digest, the components and links"),

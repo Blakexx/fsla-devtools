@@ -3,13 +3,13 @@ of the Bazel it downloaded (`BAZEL_REAL`), and that stub runs `main` here, so ev
 through one implementation, typed or run by a tool.
 
 It hands Bazel the machine's settings from the dev config (the shared disk and repository caches under
-`host.build_cache`, as an rc file read after the workspace's), and, where the workspace depends on the `rola_devtools`
-module, the machine's rola-devtools checkout as that module's override (a second rc file, the workspace's own), so a
-change made there is the one the graph runs and nothing names a machine path. It runs every BUILD under the host
-budget (`rola_devtools.locks.host`): a command's build phase holds the slots free when it starts, at least one, and
-runs one compile job a `host.nvcc_threads` of them; its test or run phase holds none, so a test or a measurement takes
-its own locks as it does outside the graph -- a GPU test under a held budget is the deadlock the host's lock order
-exists to prevent.
+`host.build_cache`, the environment store's bound `host.store_max_gb` and `host.store_max_age_days`, as an rc file read
+after the workspace's), and, where the workspace depends on the `rola_devtools` module, the machine's rola-devtools
+checkout as that module's override (a second rc file, the workspace's own), so a change made there is the one the graph
+runs and nothing names a machine path. It runs every BUILD under the host budget (`rola_devtools.locks.host`): a
+command's build phase holds the slots free when it starts, at least one, and runs one compile job a `host.nvcc_threads`
+of them; its test or run phase holds none, so a test or a measurement takes its own locks as it does outside the graph
+-- a GPU test under a held budget is the deadlock the host's lock order exists to prevent.
 """
 from __future__ import annotations
 
@@ -67,6 +67,10 @@ def machine_rc() -> Path:
         f"common --disk_cache={cache / 'disk'}\n"
         f"common --repository_cache={cache / 'repository'}\n"
         f"common --repo_env=ROLA_GRAPH_STORE={cache / 'store'}\n"
+        #: the store's bound, read by the environment's builder from the repository environment (not recorded: a changed
+        #: bound is not a new environment)
+        f"common --repo_env=ROLA_GRAPH_STORE_MAX_BYTES={config.machine('host.store_max_gb') * 1024**3}\n"
+        f"common --repo_env=ROLA_GRAPH_STORE_MAX_AGE_DAYS={config.machine('host.store_max_age_days')}\n"
         f"common --repo_env=ROLA_NVCC_THREADS={config.machine('host.nvcc_threads')}\n"
         #: a check of the commit reads the machine's dev config; a check over files unsets it
         f"test --test_env=ROLA_DEV_CONFIG={config.directory()}\n"))
