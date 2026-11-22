@@ -66,7 +66,8 @@ class Mirror(unittest.TestCase):
         scan = Path(self.tmp.name) / "scan"
         (scan / "tool").mkdir(parents=True)
         shutil.copy(mirror.__file__, scan / "tool" / "mirror.py")
-        self.assertEqual(mirror.tripwire(scan, {}), [])
+        decl = {**DECLARED, "agent_files": True, "emails": []}
+        self.assertEqual(mirror.tripwire(scan, decl), [])
         for name, text, finding in [("csrc/CLAUDE.md", "notes", "an agent file"),
                                     ("docs/a/.claude/settings.json", "{}", "an agent file"),
                                     ("docs/x.md", f"built at {SOMEONES_HOME}/fsla", "a home directory"),
@@ -75,14 +76,15 @@ class Mirror(unittest.TestCase):
             path = scan / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
-            self.assertIn(f"{name}: {finding}", mirror.tripwire(scan, {}))
+            self.assertIn(f"{name}: {finding}", mirror.tripwire(scan, decl))
             path.unlink()
 
     def test_an_allowed_shape_passes_but_a_credential_can_never_be_allowed(self):
         scan = Path(self.tmp.name) / "scan"
         scan.mkdir()
         (scan / "r.json").write_text(f'{{"fsla_file": "{SOMEONES_HOME}/fsla/__init__.py"}}')
-        self.assertEqual(mirror.tripwire(scan, {"a home directory": "records name their checkout"}), [])
+        self.assertEqual(mirror.tripwire(scan, {**DECLARED, "agent_files": True, "emails": [],
+                                                "allow": {"a home directory": "records name their checkout"}}), [])
         bad = scan / "declarations.json"
         bad.write_text('{"public": "o/r", "ships": [], "private": [], "allow": {"a credential": "no"}}')
         with self.assertRaisesRegex(SystemExit, "no allowable shape"):

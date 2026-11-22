@@ -6,6 +6,7 @@ carry it. It is a development dependency: nothing a user installs imports it.
 | Module | What it is |
 |---|---|
 | `fsla_devtools.mirror` | the public mirror's export, run by each repository's commit gate and its mirror workflow |
+| `fsla_devtools.tripwire` | the mirror's content checks over a staged diff or a pushed range, run by each repository's pre-commit and pre-push hooks |
 | `fsla_devtools.cells` | the central cell registry: every input an FSLA measurement or test runs on (carry, layer, producer, QKV), its draw, its seed and the regime it proves, named once; bases and the cells derived from them; each cell declarable as a build NODE whose output is its record |
 | `fsla_devtools.build` | the declared build system: targets declared by composable functions in files, keyed by what they read, cached or run in dependency order, holding the machine's resources, each in its own environment's worker |
 | `fsla_devtools.timing` | the timing system, as targets: a server of entry workers, registrations of timed callables on cells, interleaved clock-locked sessions, memory passes, null gates |
@@ -32,11 +33,20 @@ at commit time: a new file never ships, and never silently stays behind, until s
 ships rather than what hides, because a list of hidden things fails open on the file nobody anticipated.
 
 **The tripwire.** The export is HEAD's shipping files, written by `git archive` (committed bytes only). It is refused if
-any file is an agent or scratch file at any depth (`CLAUDE.md`, `.claude/`, `SCRATCHPAD.md`) or holds a private-shaped
-string: a home directory, the private scratch repository's name, a personal email address, a cloud project or bucket
-identifier, or a credential (GitHub, Hugging Face, Anthropic and AWS token shapes, a private key block). `allow` names
-shapes a repository's published files may carry, each with its reason; a credential can never be allowed. Every pattern
-is spelled so that the tool's own text does not match it.
+any file holds a private-shaped string: a home directory, the private scratch repository's name, an email address other
+than the declared `emails` (the author's; `noreply` and `example` addresses never count), an IPv4 address (loopback and the
+documentation ranges excepted), a cloud project or bucket identifier, a provider account or instance id, a ledger event id,
+or a credential (GitHub, Hugging Face, Anthropic and AWS token shapes, a private key block). `allow` names shapes a
+repository's published files may carry, each with its reason; a credential can never be allowed. Every pattern is spelled
+so that the tool's own text does not match it. Agent files (`.claude/`, `CLAUDE.md`) are refused at any depth when the
+declarations' `agent_files` is true, its default (the paper keeps it); a code repository whose agent configuration is public
+declares `"agent_files": false` and lists neither under `private`. `SCRATCHPAD.md` is always refused.
+
+**At commit and push.** The same checks run before the mirror does, over the lines a change adds, so a violation is
+refused before it is history (the full history ships): `python -m fsla_devtools.tripwire --staged` in the pre-commit
+hook, `--range A..B` (any `git log` revisions) in the pre-push hook, over every commit patch by patch, so a secret added
+and removed inside the push still refuses it; `--tree` reads HEAD whole. A refusal is a line
+`TRIPWIRE REFUSED: path:line: the check`. Files declared `private` are not read.
 
 **The snapshot.** Each repository's `.github/workflows/mirror.yml` installs this package at a pinned commit, runs the
 export on the pushed commit, commits the export on top of the public repository's `main` naming the development commit
