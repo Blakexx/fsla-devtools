@@ -47,7 +47,7 @@ tree_test(
 )
 
 tree_test(
-    name = "mirror_declarations",
+    name = "declarations",
     size = "small",
     cmd = ["python3", "-m", "fsla_devtools.mirror", "--check"],
     data = [":tree"],
@@ -58,7 +58,7 @@ tree_test(
 test_suite(
     name = "gate",
     tests = [
-        ":mirror_declarations",
+        ":declarations",
         ":ruff",
         ":ruff_e3",
         ":tests",

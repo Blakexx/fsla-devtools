@@ -1,7 +1,7 @@
 """fsla_devtools: the development tools every FSLA repository shares, standard library only.
 
-- `fsla_devtools.mirror`: the public mirror's export (every tracked path declared ships or private, a tripwire over
-  private-shaped content), run by each repository's commit gate and its mirror workflow.
+- `fsla_devtools.mirror`: the declarations (every tracked path declared ships or private) and the private-shaped content
+  the tripwire refuses, run by each repository's commit gate; `fsla_devtools.tripwire` runs the checks at commit and push.
 - `fsla_devtools.cells`: the central cell registry -- every input (carry, layer, QKV) with its draw, seed and regime
   proof, named once for every package -- with bases, derived cells, and the node a declaration takes a cell as.
 - `fsla_devtools.build`: the declared build system -- targets declared in files, keyed, cached, held and run.

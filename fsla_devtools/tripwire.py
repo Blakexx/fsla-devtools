@@ -1,14 +1,14 @@
-"""THE MIRROR'S CONTENT CHECKS, AT COMMIT AND PUSH: what the public mirror refuses to export (home paths, other people's
+"""THE CONTENT CHECKS, AT COMMIT AND PUSH: what a public repository must not carry (home paths, other people's
 email addresses, IPv4 addresses, credential formats, provider account and instance ids, the private scratch repository's
-name, ledger event ids, and the agent files where a repository keeps them private), run over the lines a commit or a push
-adds, so a violation is refused before it is history.
+name, ledger event ids, and the agent files where a repository's declarations refuse them), run over the lines a
+commit or a push adds, so a violation is refused before it is history.
 
     python -m fsla_devtools.tripwire --staged           the staged diff (a pre-commit hook)
     python -m fsla_devtools.tripwire --range A..B ...   every commit of the revisions, patch by patch (a pre-push hook);
                                                         more than one argument is passed to `git log` as given
     python -m fsla_devtools.tripwire --tree             every tracked file of HEAD, whole
 
-Run from inside the repository, under its `.github/mirror/declarations.json`: only files declared to ship are checked,
+Run from inside the repository, under its `.github/mirror/declarations.json`: files declared `private` are not checked,
 `allow` and `emails` and `agent_files` are the repository's own. Exit 1 on any refusal, each a line `path:line: shape`.
 """
 from __future__ import annotations

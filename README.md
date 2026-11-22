@@ -5,8 +5,8 @@ carry it. It is a development dependency: nothing a user installs imports it.
 
 | Module | What it is |
 |---|---|
-| `fsla_devtools.mirror` | the public mirror's export, run by each repository's commit gate and its mirror workflow |
-| `fsla_devtools.tripwire` | the mirror's content checks over a staged diff or a pushed range, run by each repository's pre-commit and pre-push hooks |
+| `fsla_devtools.mirror` | the declarations (`.github/mirror/declarations.json`), their check and the private-shaped content the tripwire refuses, run by each repository's commit gate |
+| `fsla_devtools.tripwire` | the content checks over a staged diff or a pushed range, run by each repository's pre-commit and pre-push hooks |
 | `fsla_devtools.cells` | the central cell registry: every input an FSLA measurement or test runs on (carry, layer, producer, QKV), its draw, its seed and the regime it proves, named once; bases and the cells derived from them; each cell declarable as a build NODE whose output is its record |
 | `fsla_devtools.build` | the declared build system: targets declared by composable functions in files, keyed by what they read, cached or run in dependency order, holding the machine's resources, each in its own environment's worker |
 | `fsla_devtools.timing` | the timing system, as targets: a server of entry workers, registrations of timed callables on cells, interleaved clock-locked sessions, memory passes, null gates |
@@ -21,39 +21,27 @@ carry it. It is a development dependency: nothing a user installs imports it.
 The `fsla_devtools` Bazel module (`MODULE.bazel`, `bazel/`) is the rest of the build graph's machinery: its
 environment extension and generic rules (below).
 
-## The public mirror
+## The declarations and the tripwire
 
-Each FSLA project lives in two places: a private development repository, where every branch is pushed, and a public
-repository holding what has been published. A push to the development repository's default branch publishes.
+Every FSLA repository is developed in public, with its whole history. `.github/mirror/declarations.json` in a repository
+declares every tracked path (`ships` and `private` list path prefixes; a path takes the longest entry it falls under),
+and `python -m fsla_devtools.mirror --check` refuses a tracked path under no entry, at commit time. Its other fields are
+the tripwire's own: `allow` names shapes the repository's files may carry, each with its reason, `emails` the addresses
+a file may carry (the author's), and `agent_files` whether `.claude/` and `CLAUDE.md` are refused at any depth (default
+true; a code repository whose agent configuration is public declares `"agent_files": false`).
 
-**What ships.** `.github/mirror/declarations.json` in the repository declares every tracked path. `ships` and `private`
-list path prefixes, and a path takes the longest entry it falls under, so a directory can ship while one file inside it
-stays private. A tracked path under no entry refuses the export, and `python -m fsla_devtools.mirror --check` refuses it
-at commit time: a new file never ships, and never silently stays behind, until someone declares it. The list names what
-ships rather than what hides, because a list of hidden things fails open on the file nobody anticipated.
-
-**The tripwire.** The export is HEAD's shipping files, written by `git archive` (committed bytes only). It is refused if
-any file holds a private-shaped string: a home directory, the private scratch repository's name, an email address other
-than the declared `emails` (the author's; `noreply` and `example` addresses never count), an IPv4 address (loopback and the
-documentation ranges excepted), a cloud project or bucket identifier, a provider account or instance id, a ledger event id,
-or a credential (GitHub, Hugging Face, Anthropic and AWS token shapes, a private key block). `allow` names shapes a
-repository's published files may carry, each with its reason; a credential can never be allowed. Every pattern is spelled
-so that the tool's own text does not match it. Agent files (`.claude/`, `CLAUDE.md`) are refused at any depth when the
-declarations' `agent_files` is true, its default (the paper keeps it); a code repository whose agent configuration is public
-declares `"agent_files": false` and lists neither under `private`. `SCRATCHPAD.md` is always refused.
-
-**At commit and push.** The same checks run before the mirror does, over the lines a change adds, so a violation is
-refused before it is history (the full history ships): `python -m fsla_devtools.tripwire --staged` in the pre-commit
-hook, `--range A..B` (any `git log` revisions) in the pre-push hook, over every commit patch by patch, so a secret added
-and removed inside the push still refuses it; `--tree` reads HEAD whole. A refusal is a line
-`TRIPWIRE REFUSED: path:line: the check`. Files declared `private` are not read.
-
-**This repository.** It is developed in public: it has no mirror workflow, and its declarations remain for the tripwire (`agent_files`, `emails`) and the gate's declaration check. Other repositories' `mirror.yml` installs this package at a pinned commit of this repository.
+**The tripwire** refuses a private-shaped string: a home directory, the private scratch repository's name, an email
+address other than the declared `emails` (`noreply` and `example` addresses never count), an IPv4 address (loopback and
+the documentation ranges excepted), a cloud project or bucket identifier, a provider account or instance id, a ledger
+event id, or a credential (GitHub, Hugging Face, Anthropic and AWS token shapes, a private key block); a credential can
+never be allowed. Every pattern is spelled so that the tool's own text does not match it. `SCRATCHPAD.md` is always
+refused. The checks run over the lines a change adds, so a violation is refused before it is history:
+`python -m fsla_devtools.tripwire --staged` in the pre-commit hook, `--range A..B` (any `git log` revisions) in the
+pre-push hook, over every commit patch by patch, so a secret added and removed inside the push still refuses it; `--tree`
+reads HEAD whole. A refusal is a line `TRIPWIRE REFUSED: path:line: the check`. Files declared `private` are not read.
 
 ```bash
-python -m fsla_devtools.mirror /tmp/export   # the export of HEAD, with any refusal
 python -m fsla_devtools.mirror --check       # every tracked path declared
-python -m fsla_devtools.mirror --public      # the public repository
 ```
 
 ## The declared build system
@@ -236,13 +224,13 @@ argument; a workspace wraps them once with its own.
 bazel test //:gate
 ```
 
-The gate is ruff, its blank-line family, the tests and the mirror's declaration check, on the graph's own environment.
+The gate is ruff, its blank-line family, the tests and the declaration check, on the graph's own environment.
 The commit gate (`.githooks/pre-commit` -> `bazel/bazel --commit-gate`, every FSLA repository's hook) runs `//:gate` on
 the commit as git will write it: the changes not staged set aside, the tree the commit's index.
 
 ## Publishing
 
-This repository is developed in public: `Blakexx/fsla-devtools` is the development repository itself, with its whole history, and has no mirror. The earlier snapshot repository is archived as `Blakexx/fsla-devtools-snapshots`.
+This repository is developed in public: `Blakexx/fsla-devtools` is the development repository, with its whole history.
 
 ## License
 

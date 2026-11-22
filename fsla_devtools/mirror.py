@@ -1,20 +1,17 @@
-"""THE PUBLIC MIRROR'S EXPORT: the committed files a repository publishes, written to a directory, refused when a
-tracked path has no declaration or anything private-shaped would leave.
+"""THE DECLARATIONS AND THE CHECKS' SHAPES: a repository's `.github/mirror/declarations.json` (its path declarations and
+the private-shaped content its files may carry) and the shapes the tripwire (`fsla_devtools.tripwire`) refuses in a
+public repository.
 
-    python -m fsla_devtools.mirror EXPORT_DIR   write HEAD's export; exit 1 on any refusal
     python -m fsla_devtools.mirror --check      every tracked path is declared; exit 1 naming the ones that are not
-    python -m fsla_devtools.mirror --public     print the public repository (owner/name) the export is pushed to
 
-Run from inside the repository. Its own part is `.github/mirror/declarations.json`; see this package's README.
+Run from inside the repository; see this package's README.
 """
 from __future__ import annotations
 
-import io
 import json
 import re
 import subprocess
 import sys
-import tarfile
 from pathlib import Path
 
 #: where a repository declares what it publishes, relative to its root
@@ -25,7 +22,7 @@ DECLARATIONS = Path(".github") / "mirror" / "declarations.json"
 AGENT_FILES = re.compile(r"(^|/)(\.claude/|CLAUDE\.md$)")
 SCRATCH_FILES = re.compile(r"(^|/)SCRATCHPAD\.md$")
 #: private-shaped strings. Each is spelled so that this file's own text does not match it: the tool is scanned with
-#: everything else where it ships.
+#: everything else.
 _OCTET = r"(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
 PRIVATE_SHAPES = {
     "a home directory": re.compile(r"/home/[a-z]|/Users/[A-Za-z]"),
@@ -44,9 +41,9 @@ PRIVATE_SHAPES = {
 NEVER_ALLOWED = ("a credential",)
 #: addresses that are not a person's: loopback and the documentation ranges
 _NOT_AN_ADDRESS = re.compile(r"^(?:0[.]0[.]0[.]0|127[.].*|192[.]0[.]2[.].*|198[.]51[.]100[.].*|203[.]0[.]113[.].*)$")
-#: the optional declarations: `agent_files` (bool, default true: `.claude/` and `CLAUDE.md` stay private) and `emails`
-#: (the addresses a published file may carry: the author's)
-OPTIONAL = {"agent_files": True, "emails": []}
+#: the optional declarations: `public` (the repository's own name, read by nothing), `agent_files` (bool, default true:
+#: `.claude/` and `CLAUDE.md` stay private) and `emails` (the addresses a published file may carry: the author's)
+OPTIONAL = {"public": "", "agent_files": True, "emails": []}
 
 
 def root() -> Path:
@@ -60,9 +57,9 @@ def root() -> Path:
 def declarations(path: Path | None = None) -> dict:
     path = path or root() / DECLARATIONS
     blob = json.loads(path.read_text())
-    required = {"public", "ships", "private", "allow"}
+    required = {"ships", "private", "allow"}
     if not required <= set(blob) or set(blob) - required - set(OPTIONAL):
-        raise SystemExit(f"{path}: fields must be public, ships, private, allow and optionally {sorted(OPTIONAL)}; "
+        raise SystemExit(f"{path}: fields must be ships, private, allow and optionally {sorted(OPTIONAL)}; "
                          f"got {sorted(blob)}")
     for key, default in OPTIONAL.items():
         blob.setdefault(key, default)
@@ -88,7 +85,7 @@ def undeclared(paths: list[str], decl: dict) -> list[str]:
     return [p for p in paths if declaration(p, decl) is None]
 
 
-def scan(name: str, lines: list[tuple[int, str]], decl: dict, numbered: bool = True) -> list[str]:
+def scan(name: str, lines: list[tuple[int, str]], decl: dict) -> list[str]:
     """The refusals for one file's `name` and its `lines` (line number, text; a diff's added lines are enough): the
     agent-file rule where the declarations keep agent files private, then each private-shaped string the declarations do
     not allow, at its first line."""
@@ -100,7 +97,7 @@ def scan(name: str, lines: list[tuple[int, str]], decl: dict, numbered: bool = T
             continue
         for number, line in lines:
             if any(not _allowed(shape, m.group(), decl) for m in pattern.finditer(line)):
-                findings.append(f"{name}:{number}: {shape}" if numbered else f"{name}: {shape}")
+                findings.append(f"{name}:{number}: {shape}")
                 break
     return findings
 
@@ -115,11 +112,10 @@ def whole(text: str) -> list[tuple[int, str]]:
     return list(enumerate(text.splitlines(), 1))
 
 
-def scan_files(files: dict[str, list[tuple[int, str]]], decl: dict, numbered: bool = True) -> list[str]:
-    """The tripwire over a set of files (path to numbered lines): the files declared private are not scanned, they do not
-    ship."""
+def scan_files(files: dict[str, list[tuple[int, str]]], decl: dict) -> list[str]:
+    """The tripwire over a set of files (path to numbered lines): the files declared private are not scanned."""
     return [f for name, lines in sorted(files.items()) if declaration(name, decl) != "private"
-            for f in scan(name, lines, decl, numbered)]
+            for f in scan(name, lines, decl)]
 
 
 def added_lines(diff: str) -> dict[str, list[tuple[int, str]]]:
@@ -156,40 +152,15 @@ def range_diff(revisions: list[str]) -> str:
                 *revisions).decode(errors="ignore")
 
 
-def tripwire(export: Path, decl: dict) -> list[str]:
-    """The tripwire over the files under `export`."""
-    files = {p.relative_to(export).as_posix(): whole(p.read_bytes().decode("utf-8", errors="ignore"))
-             for p in export.rglob("*") if p.is_file()}
-    return scan_files(files, {**decl, "private": []}, numbered=False)
-
-
-def export(target: Path, decl: dict) -> list[str]:
-    """Write HEAD's shipping files under `target`; the refusals, empty when the export is clean."""
-    paths = [p for p in _git("ls-tree", "-r", "-z", "--name-only", "HEAD").decode().split("\0") if p]
-    missing = undeclared(paths, decl)
-    if missing:
-        return [f"{p}: tracked but declared neither ships nor private" for p in missing]
-    ships = [p for p in paths if declaration(p, decl) == "ships"]
-    target.mkdir(parents=True, exist_ok=True)
-    with tarfile.open(fileobj=io.BytesIO(_git("archive", "--format=tar", "HEAD", "--", *ships))) as tar:
-        tar.extractall(target, filter="data")
-    return tripwire(target, decl)
-
-
 def main(argv: list[str]) -> int:
     decl = declarations()
-    if argv == ["--public"]:
-        print(decl["public"])
-        return 0
     if argv == ["--check"]:
         refusals = [f"{p}: tracked but declared neither ships nor private"
                     for p in undeclared([p for p in _git("ls-files", "-z").decode().split("\0") if p], decl)]
-    elif len(argv) == 1 and not argv[0].startswith("-"):
-        refusals = export(Path(argv[0]), decl)
     else:
         raise SystemExit(__doc__)
     for refusal in refusals:
-        print(f"MIRROR REFUSED: {refusal} ({DECLARATIONS})")
+        print(f"DECLARATIONS REFUSED: {refusal} ({DECLARATIONS})")
     return 1 if refusals else 0
 
 
