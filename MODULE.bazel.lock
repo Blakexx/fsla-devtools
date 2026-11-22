@@ -200,7 +200,7 @@
     "//bazel:environment.bzl%environment": {
       "general": {
         "bzlTransitiveDigest": "fWnz4VEUK1f2i7SoVPWoX+jUPEjYcsA3snToJt8FN/M=",
-        "usagesDigest": "DW5FQ1ODxPZ/xmNJ4EZtNsixn0ENUE/9hbXwsY8fjSs=",
+        "usagesDigest": "WBthK8RAqGnM0VX7aI4pH1zRVwXvt7QhHmO/OjOQ79k=",
         "recordedInputs": [
           "REPO_MAPPING:,uv +environment+uv"
         ],
@@ -215,7 +215,7 @@
               "index_field": "torch_index",
               "devtools": true,
               "packages": [
-                "fsla-results @ git+https://github.com/Blakexx/fsla-results@4e22b9f580be6a9e083460be1c4cc447270112ab"
+                "fsla-results @ git+https://github.com/Blakexx/fsla-results@90085af6e2ca9c22d3724c0c719ba91b146cdd8c"
               ],
               "isolated_builds": true,
               "post_args": [],
