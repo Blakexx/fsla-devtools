@@ -18,7 +18,7 @@ def _ledger(line: str) -> None:
 
 
 def record(ctx) -> dict:
-    """A CELL NODE: its record, as `rola_devtools.cells.executors.record` produces one -- the provider that draws it,
+    """A CELL NODE: its record, as `fsla_devtools.cells.executors.record` produces one -- the provider that draws it,
     its parameters and the digest of the code that draws it, so a target taking it keys on all three."""
     _ledger(f"record {ctx.label}")
     name = ctx.params["cell"]
@@ -32,7 +32,7 @@ def echo(ctx) -> dict:
     (ctx.workspace / "raw.txt").write_text(ctx.label)
     return {"params": ctx.params, "settings": ctx.settings, "inputs": [c["name"] for c in ctx.inputs],
             "deps": {role: dep.output for role, dep in ctx.deps.items()},
-            "held": os.environ.get("ROLA_GPU_LOCK_HELD")}
+            "held": os.environ.get("FSLA_GPU_LOCK_HELD")}
 
 
 def boom(ctx) -> dict:

@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rola_devtools.cells import Registry, build
+from fsla_devtools.cells import Registry, build
 
 HERE = Path(__file__).resolve().parent
 

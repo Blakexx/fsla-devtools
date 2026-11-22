@@ -1,6 +1,6 @@
 """The central registry: every file loads, a record holds its input and nothing a package runs it with, every carry
 cell realizes on the device and sits in its declared regime, the regime checks have teeth, and the frozen corners stay
-(the checks moved from rola's tests/unit/test_cell_regimes.py). Needs torch and a CUDA device -- the gate runs in a venv
+(the checks moved from fsla's tests/unit/test_cell_regimes.py). Needs torch and a CUDA device -- the gate runs in a venv
 with both, and a missing device fails rather than skips; the device tests hold the GPU lock shared, with the machine's
 lock settings but `host.nice` off, so this process's priority is left for the lock tests to observe.
 `python -m unittest tests.test_central_cells`"""
@@ -15,10 +15,10 @@ from types import SimpleNamespace
 
 import torch
 
-from rola_devtools import config
-from rola_devtools.cells import FILES, build, carry, cell, central, layer, producer, qkv
-from rola_devtools.cells.regimes import REGIME_AXES, View, check
-from rola_devtools.locks.gpu import gpu_lock
+from fsla_devtools import config
+from fsla_devtools.cells import FILES, build, carry, cell, central, layer, producer, qkv
+from fsla_devtools.cells.regimes import REGIME_AXES, View, check
+from fsla_devtools.locks.gpu import gpu_lock
 
 #: THE CORNERS, frozen: a named region of the distribution, once a cell, never leaves the registry.
 CORNERS = ("corner-tied-k4", "corner-concentrated", "corner-window-flip", "corner-onehot", "corner-anti",

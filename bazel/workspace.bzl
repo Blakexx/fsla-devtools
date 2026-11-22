@@ -1,4 +1,4 @@
-"""rola-devtools' own graph (when it is the root workspace): the module's generic rules handed this workspace's
+"""fsla-devtools' own graph (when it is the root workspace): the module's generic rules handed this workspace's
 environment and tree. Never loaded by a workspace depending on the module, which wraps the rules with its own."""
 
 load("@devtools_env//:flags.bzl", "VENV")

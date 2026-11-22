@@ -1,4 +1,4 @@
-"""rola-devtools' root package: the files the module's environment extension reads of this checkout (the Python
+"""fsla-devtools' root package: the files the module's environment extension reads of this checkout (the Python
 package's project file and the files its install reads), and this workspace's own checks and gate."""
 
 load("//bazel:workspace.bzl", "tree_part", "tree_test")
@@ -19,14 +19,14 @@ filegroup(
         ":tracked",
         "//bazel:tracked",
         "//pins:tracked",
-        "//rola_devtools/graph:tracked",
+        "//fsla_devtools/graph:tracked",
     ],
 )
 
 tree_test(
     name = "ruff",
     size = "small",
-    cmd = ["ruff", "check", "rola_devtools", "tests"],
+    cmd = ["ruff", "check", "fsla_devtools", "tests"],
     data = [":tree"],
 )
 
@@ -34,7 +34,7 @@ tree_test(
     name = "ruff_e3",
     size = "small",
     #: ruff's blank-line family is preview-gated, so its own invocation
-    cmd = ["ruff", "check", "--preview", "--select", "E3", "rola_devtools", "tests"],
+    cmd = ["ruff", "check", "--preview", "--select", "E3", "fsla_devtools", "tests"],
     data = [":tree"],
 )
 
@@ -49,7 +49,7 @@ tree_test(
 tree_test(
     name = "mirror_declarations",
     size = "small",
-    cmd = ["python3", "-m", "rola_devtools.mirror", "--check"],
+    cmd = ["python3", "-m", "fsla_devtools.mirror", "--check"],
     data = [":tree"],
     git = True,
 )

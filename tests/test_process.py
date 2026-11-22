@@ -9,7 +9,7 @@ import time
 import unittest
 from pathlib import Path
 
-from rola_devtools.process import alive, run
+from fsla_devtools.process import alive, run
 
 #: starts a grandchild in a session of its own, writes its pid, and waits on it
 SPAWNER = ("import subprocess, sys; child = subprocess.Popen(['sleep', '300'], start_new_session=True); "

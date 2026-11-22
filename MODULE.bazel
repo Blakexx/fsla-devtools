@@ -1,16 +1,16 @@
-"""rola-devtools as a Bazel module: the build graph's shared machinery every RoLA repository's graph runs on -- the
+"""fsla-devtools as a Bazel module: the build graph's shared machinery every FSLA repository's graph runs on -- the
 environment extension (bazel/environment.bzl) and the generic rules (bazel/rules.bzl) -- beside the Python package the
-front door and the environment's store builder are (`rola_devtools.graph`). A workspace depends on it by `bazel_dep`
+front door and the environment's store builder are (`fsla_devtools.graph`). A workspace depends on it by `bazel_dep`
 at a public commit (`git_override`), and its front door overrides that with the machine's checkout."""
 
-module(name = "rola_devtools", version = "0.1.0")
+module(name = "fsla_devtools", version = "0.1.0")
 
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 #: a workspace's environment BUILD file may define C++ targets over the environment's headers (torch's, Python's): the
 #: repositories this module's extension makes see this module's dependencies
 bazel_dep(name = "rules_cc", version = "0.2.28")
 
-#: THIS WORKSPACE'S OWN GRAPH, when rola-devtools is the root (a dev dependency, which a workspace depending on the
+#: THIS WORKSPACE'S OWN GRAPH, when fsla-devtools is the root (a dev dependency, which a workspace depending on the
 #: module never sees): the pinned uv, the environment its gate runs on, and the tracked tree
 environment = use_extension("//bazel:environment.bzl", "environment", dev_dependency = True)
 environment.pinned(
@@ -22,8 +22,8 @@ environment.python(
     name = "devtools_env",
     index = "https://download.pytorch.org/whl/cu130",
     lock = "//:requirements.lock",
-    #: rola-results, whose store the timing tests write, at its public commit
-    packages = ["rola-results @ git+https://github.com/Blakexx/rola-results@40b41681bb4fd22f744810a3a2281c8e7c376327"],
+    #: fsla-results, whose store the timing tests write, at its public commit
+    packages = ["fsla-results @ git+https://github.com/Blakexx/fsla-results@4e22b9f580be6a9e083460be1c4cc447270112ab"],
     uv = "@uv//:uv",
     uv_pin = "//pins:uv_pin.json",
 )

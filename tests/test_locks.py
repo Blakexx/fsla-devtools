@@ -1,5 +1,5 @@
 """The machine's locks, proven with fake children: small driver processes that hold a lock and wait to be told to
-release, never a compile or a GPU kernel, every lock file under a throwaway directory (moved from rola's
+release, never a compile or a GPU kernel, every lock file under a throwaway directory (moved from fsla's
 tests/unit/test_locks_accounting.py and test_lock_priority.py).
 
 - N+1 acquirers of an N-slot host budget: the (N+1)th blocks, and releasing one of the N admits it.
@@ -20,21 +20,21 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rola_devtools import config
-from rola_devtools.locks import host
+from fsla_devtools import config
+from fsla_devtools.locks import host
 
 ROOT = Path(__file__).resolve().parents[1]
 TIMEOUT_S = 5.0
 
 #: holds one host-budget slot, announces it, and blocks on stdin until told to let go
 HOLD_HOST_BUDGET = ("import sys\n"
-                    "from rola_devtools.locks import host\n"
+                    "from fsla_devtools.locks import host\n"
                     "with host.acquire(1, label='test-hold'):\n"
                     "    print('ACQUIRED', flush=True)\n"
                     "    sys.stdin.readline()\n")
 #: the same for the GPU lock: argv[1] the lock path, argv[2] the mode
 HOLD_GPU_LOCK = ("import sys\n"
-                 "from rola_devtools.locks.gpu import gpu_lock\n"
+                 "from fsla_devtools.locks.gpu import gpu_lock\n"
                  "with gpu_lock(sys.argv[1], mode=sys.argv[2]):\n"
                  "    print('ACQUIRED', flush=True)\n"
                  "    sys.stdin.readline()\n")
@@ -43,14 +43,14 @@ READ_NICE = ("import pathlib, sys\n"
              "raw = pathlib.Path('/proc/self/stat').read_text()\n"
              "sys.stdout.write(raw[raw.rindex(')') + 2:].split()[19 - 3])\n")
 NICE_UNDER_GPU_LOCK = ("import subprocess, sys\n"
-                       "from rola_devtools.locks.gpu import gpu_lock\n"
+                       "from fsla_devtools.locks.gpu import gpu_lock\n"
                        "with gpu_lock(sys.argv[1]):\n"
                        f"    sys.stdout.write(subprocess.run([sys.executable, '-c', {READ_NICE!r}], capture_output=True, "
                        "text=True, check=True).stdout)\n")
 
 
 class Configured(unittest.TestCase):
-    """A dev config directory of this test's own, handed to children through `ROLA_DEV_CONFIG`."""
+    """A dev config directory of this test's own, handed to children through `FSLA_DEV_CONFIG`."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -62,7 +62,7 @@ class Configured(unittest.TestCase):
         root.mkdir()
         for section, values in sections.items():
             (root / f"{section}.json").write_text(json.dumps(values))
-        env = {k: v for k, v in os.environ.items() if k not in ("ROLA_HOST_BUDGET_HELD", "ROLA_GPU_LOCK_HELD")}
+        env = {k: v for k, v in os.environ.items() if k not in ("FSLA_HOST_BUDGET_HELD", "FSLA_GPU_LOCK_HELD")}
         env[config.POINTER] = str(root)
         env["PYTHONPATH"] = str(ROOT)
         return env
@@ -110,9 +110,9 @@ class HostBudget(Configured):
         locks = self.tmp / "locks"
         locks.mkdir()
         env = self.env(host={"lock_dir": str(locks), "budget_slots": 1, "nice": False})
-        saved = {k: os.environ.get(k) for k in (config.POINTER, "ROLA_HOST_BUDGET_HELD")}
+        saved = {k: os.environ.get(k) for k in (config.POINTER, "FSLA_HOST_BUDGET_HELD")}
         os.environ[config.POINTER] = env[config.POINTER]
-        os.environ["ROLA_HOST_BUDGET_HELD"] = "999999"
+        os.environ["FSLA_HOST_BUDGET_HELD"] = "999999"
         config.reload()
         try:
             with host.acquire(5, label="nested") as held:
@@ -127,8 +127,8 @@ class HostBudget(Configured):
 class GpuLockCommand(Configured):
     def test_a_command_runs_under_the_lock_and_its_children_see_it_held(self):
         env = self.env(host={"lock_dir": str(self.tmp), "gpu_lock": str(self.tmp / "gpu.lock"), "nice": False})
-        done = subprocess.run([sys.executable, "-m", "rola_devtools.locks.gpu", "--", sys.executable, "-c",
-                               "import os; print(os.environ['ROLA_GPU_LOCK_HELD'])"], env=env, cwd=ROOT,
+        done = subprocess.run([sys.executable, "-m", "fsla_devtools.locks.gpu", "--", sys.executable, "-c",
+                               "import os; print(os.environ['FSLA_GPU_LOCK_HELD'])"], env=env, cwd=ROOT,
                               capture_output=True, text=True, timeout=TIMEOUT_S)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertTrue(done.stdout.strip().isdigit(), done.stdout)

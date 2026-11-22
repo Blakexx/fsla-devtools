@@ -13,13 +13,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rola_devtools import config
-from rola_devtools.build.cache import Cache
-from rola_devtools.build.declare import Env, Graph
-from rola_devtools.build.runtime import Runtime
-from rola_devtools.build.scheduler import build
-from rola_devtools.cells import Registry
-from rola_devtools.timing.declare import (
+from fsla_devtools import config
+from fsla_devtools.build.cache import Cache
+from fsla_devtools.build.declare import Env, Graph
+from fsla_devtools.build.runtime import Runtime
+from fsla_devtools.build.scheduler import build
+from fsla_devtools.cells import Registry
+from fsla_devtools.timing.declare import (
     measure_memory,
     measure_null_gate,
     measure_timing,
@@ -178,25 +178,25 @@ class Timing(unittest.TestCase):
     def test_a_stored_result_of_a_cached_source_names_the_checkout_it_ran_in(self):
         """A cached source carries no `local` facts, so where it ran reaches the store as a SETTING taken from its
         environment at declaration -- and the sample's provenance names that checkout."""
-        from rola_results import Store
+        from fsla_results import Store
 
-        from rola_devtools.store import store
+        from fsla_devtools.store import store
 
         g = Graph()
         src = g.node("inst", executor="fake_executors:echo", env=self.env("tip"))
-        kept = store(g, "store", source=src, location="rola/inst", root=str(self.root / "records"))
+        kept = store(g, "store", source=src, location="fsla/inst", root=str(self.root / "records"))
         self.go([kept])
-        (record,) = Store("rola/inst", self.root / "records").records()
+        (record,) = Store("fsla/inst", self.root / "records").records()
         self.assertEqual(list(record["samples"][-1]["provenance"]["checkouts"]), ["tip"])
 
     def test_a_stored_session_appends_a_run_stamped_sample_to_its_configurations_record(self):
-        from rola_devtools.store import store
+        from fsla_devtools.store import store
 
         g, session, _stop = self.graph([("tip/fast", "tip", "fixed", ["t8"], {"ms": 1.0})])
         kept = store(g, "store", source=session, location="timing/session", root=str(self.root / "records"))
         stop = stop_timing_server(g, "stop-after-store", server=g.targets["timing-server"], after=[kept])
         first, second = self.go([stop]), self.go([stop])
-        from rola_results import Store
+        from fsla_results import Store
 
         (record,) = Store("timing/session", self.root / "records").records()
         self.assertEqual([s["run"] for s in record["samples"]], [first["store"].output["run"], second["store"].output["run"]])

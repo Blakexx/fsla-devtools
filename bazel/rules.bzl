@@ -1,4 +1,4 @@
-"""THE GRAPH'S GENERIC RULES, every RoLA repository's: a check over the tree's tracked files (`tree_test`), a check of the
+"""THE GRAPH'S GENERIC RULES, every FSLA repository's: a check over the tree's tracked files (`tree_test`), a check of the
 commit (`checkout_test`), a tree tool as a test (`tool_test`) or as a run target (`tool_run`), a package's part of the
 tree (`tree_part`), and the pytest tiers (`pytest_tier`, `device_lane`). A workspace's environment is its own (the
 environment extension's `python` tag), so each rule takes it as an argument: `venv`, the environment's store path from
@@ -9,7 +9,7 @@ load("@bazel_skylib//lib:shell.bzl", "shell")
 
 _TREE_TEST = """\
 #!/bin/bash
-# a check over the tree's tracked files (rola_devtools' tree_test): the runfiles copied into a real tree first, so a
+# a check over the tree's tracked files (fsla_devtools' tree_test): the runfiles copied into a real tree first, so a
 # tool that resolves a path -- the runfiles are links into the checkout -- reads the check's inputs and nothing else
 set -euo pipefail
 tree="$TEST_TMPDIR/tree"
@@ -17,7 +17,7 @@ cp -rL "$TEST_SRCDIR/_main" "$tree"
 rm -f "$tree/$TEST_BINARY"
 cd "$tree"
 #: no machine reaches a check over files: the dev config is the defaults
-unset ROLA_DEV_CONFIG
+unset FSLA_DEV_CONFIG
 export PATH={venv}/bin:/usr/bin:/bin RUFF_NO_CACHE=true
 {git}exec {cmd}
 """
@@ -46,7 +46,7 @@ tree_test = rule(
 
 _TOOL_TEST = """\
 #!/bin/bash
-# a tree tool as a test (rola_devtools' tool_test): run on the environment's base interpreter, standard library only,
+# a tree tool as a test (fsla_devtools' tool_test): run on the environment's base interpreter, standard library only,
 # with its arguments' paths in the runfiles
 set -euo pipefail
 exec {python} {tool} {args}
@@ -77,8 +77,8 @@ tool_test = rule(
 
 _CHECKOUT_TEST = """\
 #!/bin/bash
-# a check of the commit, run in the checkout it is made from (rola_devtools' checkout_test): never cached; the
-# machine's dev config is the one the front door names (ROLA_DEV_CONFIG)
+# a check of the commit, run in the checkout it is made from (fsla_devtools' checkout_test): never cached; the
+# machine's dev config is the one the front door names (FSLA_DEV_CONFIG)
 set -euo pipefail
 {resolve}cd "$(dirname "$(readlink -f "$TEST_SRCDIR/_main/MODULE.bazel")")"
 export PATH={venv}/bin:/usr/bin:/bin RUFF_NO_CACHE=true
@@ -118,7 +118,7 @@ def checkout_test(name, cmd, **kwargs):
 
 _TOOL_RUN = """\
 #!/bin/bash
-# a tree tool as a run target (rola_devtools' tool_run): in the checkout, on the checkout's own venv (`rola.venv`, the
+# a tree tool as a run target (fsla_devtools' tool_run): in the checkout, on the checkout's own venv (`fsla.venv`, the
 # git config key its venv writer records), so it imports the checkout, its siblings and the environment -- or, for a
 # tool that needs only the environment, on the environment's own interpreter
 set -euo pipefail
@@ -127,9 +127,9 @@ checkout="${{BUILD_WORKSPACE_DIRECTORY:?run through bazel run}}"
 exec "$venv/bin/python" {what} "$@"
 """
 
-_CHECKOUT_VENV = """venv="$(git -C "$checkout" config --get rola.venv || true)"
+_CHECKOUT_VENV = """venv="$(git -C "$checkout" config --get fsla.venv || true)"
 if [ ! -x "$venv/bin/python" ]; then
-  echo "$checkout has no venv of its own (git config rola.venv)" >&2
+  echo "$checkout has no venv of its own (git config fsla.venv)" >&2
   exit 1
 fi
 """
@@ -148,7 +148,7 @@ tool_run = rule(
     executable = True,
     attrs = {
         "tool": attr.string(doc = "the tool's script, from the checkout's root (`tools/lab.py`)"),
-        "module": attr.string(doc = "or the module it runs (`rola_devtools.build`)"),
+        "module": attr.string(doc = "or the module it runs (`fsla_devtools.build`)"),
         "environment": attr.bool(doc = "run on the environment's interpreter, for a tool that imports nothing of the " +
                                        "checkout's siblings (CI has no venv)"),
         "venv": attr.string(mandatory = True, doc = "the environment's store venv"),
@@ -169,7 +169,7 @@ def tree_part(tracked, parts = {}):
 
 _TIER = """\
 #!/bin/bash
-# a test tier or device lane (rola_devtools' pytest_tier, device_lane): its inputs copied into a real tree, the tree's
+# a test tier or device lane (fsla_devtools' pytest_tier, device_lane): its inputs copied into a real tree, the tree's
 # packages importable from it
 set -euo pipefail
 tree="$TEST_TMPDIR/tree"
@@ -179,10 +179,10 @@ cd "$tree"
 {machine}export PATH={venv}/bin:/usr/bin:/bin PYTHONPATH="$tree" PYTHONDONTWRITEBYTECODE=1
 {toolkit}{run}"""
 
-#: the graph's copy of a pinned CUDA toolkit, the tree its nvcc runs in, handed to the tests (`ROLA_CUDA_HOME`)
-_TOOLKIT = 'export ROLA_CUDA_HOME="$(dirname "$(dirname "$(readlink -f "$TEST_SRCDIR/_main/{nvcc}")")")"\n'
+#: the graph's copy of a pinned CUDA toolkit, the tree its nvcc runs in, handed to the tests (`FSLA_CUDA_HOME`)
+_TOOLKIT = 'export FSLA_CUDA_HOME="$(dirname "$(dirname "$(readlink -f "$TEST_SRCDIR/_main/{nvcc}")")")"\n'
 
-#: a pytest tier's run: Bazel's filter (`--test_filter`, pytest's `-k`), its shards (rola_devtools.graph.pytest_shards),
+#: a pytest tier's run: Bazel's filter (`--test_filter`, pytest's `-k`), its shards (fsla_devtools.graph.pytest_shards),
 #: its arguments (`--test_arg`) and its test report
 _PYTEST_RUN = """\
 only=()
@@ -198,7 +198,7 @@ if [ -n "${{TEST_TOTAL_SHARDS:-}}" ]; then
     exit 0
   fi
 fi
-exec {venv}/bin/python -m pytest -p no:cacheprovider -p rola_devtools.graph.pytest_shards -q -rfE \\
+exec {venv}/bin/python -m pytest -p no:cacheprovider -p fsla_devtools.graph.pytest_shards -q -rfE \\
   --junitxml="$XML_OUTPUT_FILE" {args} "${{only[@]}}" "${{shard[@]}}" "$@"
 """
 

@@ -1,4 +1,4 @@
-"""The build graph's shared machinery (`rola_devtools.graph`): the front door overrides a workspace's `rola_devtools` pin
+"""The build graph's shared machinery (`fsla_devtools.graph`): the front door overrides a workspace's `fsla_devtools` pin
 with this checkout only where the workspace depends on the module, since Bazel refuses an override of a module the
 graph does not hold; and the environment's store key follows a local package's content, its leftovers aside."""
 from __future__ import annotations
@@ -8,8 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rola_devtools import config
-from rola_devtools.graph import front_door, make_env
+from fsla_devtools import config
+from fsla_devtools.graph import front_door, make_env
 
 
 class FrontDoor(unittest.TestCase):
@@ -38,10 +38,10 @@ class FrontDoor(unittest.TestCase):
         return workspace
 
     def test_a_workspace_that_depends_on_the_module_gets_this_checkout_as_its_override(self):
-        workspace = self._workspace('module(name = "w")\nbazel_dep(name = "rola_devtools", version = "0.1.0")\n')
+        workspace = self._workspace('module(name = "w")\nbazel_dep(name = "fsla_devtools", version = "0.1.0")\n')
         rc = front_door.workspace_rc(workspace)
         self.assertIsNotNone(rc)
-        self.assertIn(f"--override_module=rola_devtools={front_door.CHECKOUT}", rc.read_text())
+        self.assertIn(f"--override_module=fsla_devtools={front_door.CHECKOUT}", rc.read_text())
 
     def test_a_workspace_that_does_not_gets_no_override(self):
         self.assertIsNone(front_door.workspace_rc(self._workspace('module(name = "w")\nbazel_dep(name = "other")\n')))
@@ -55,8 +55,8 @@ class FrontDoor(unittest.TestCase):
             f'{{"build_cache": "{self.root / "cache"}", "store_max_gb": 3, "store_max_age_days": 7}}')
         config.reload()
         text = front_door.machine_rc().read_text()
-        self.assertIn(f"--repo_env=ROLA_GRAPH_STORE_MAX_BYTES={3 * 1024**3}", text)
-        self.assertIn("--repo_env=ROLA_GRAPH_STORE_MAX_AGE_DAYS=7", text)
+        self.assertIn(f"--repo_env=FSLA_GRAPH_STORE_MAX_BYTES={3 * 1024**3}", text)
+        self.assertIn("--repo_env=FSLA_GRAPH_STORE_MAX_AGE_DAYS=7", text)
 
 
 class StoreSweep(unittest.TestCase):
@@ -154,7 +154,7 @@ class StoreKey(unittest.TestCase):
             self.assertNotEqual(make_env._identity(str(package)), first)
 
     def test_building_against_the_environment_is_another_environment(self):
-        pin = "rola-zoology @ git+https://github.com/Blakexx/rola-zoology@ea219fde"
+        pin = "fsla-zoology @ git+https://github.com/Blakexx/fsla-zoology@ea219fde"
         isolated = make_env._key(b"lock", [pin], "3.11.13", "uv 0.9", "", True)
         self.assertEqual(make_env._key(b"lock", [pin], "3.11.13", "uv 0.9", "", True), isolated)
         self.assertNotEqual(make_env._key(b"lock", [pin], "3.11.13", "uv 0.9", "", False), isolated)

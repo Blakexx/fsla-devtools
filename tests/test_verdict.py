@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import unittest
 
-from rola_devtools.verdict import (
+from fsla_devtools.verdict import (
     ALPHA,
     MIN_ROUNDS,
     _exact_two_sided_p,

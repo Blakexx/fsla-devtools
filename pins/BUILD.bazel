@@ -1,4 +1,4 @@
-"""The pins every RoLA workspace shares: uv and the Python it installs (an environment's `uv_pin`)."""
+"""The pins every FSLA workspace shares: uv and the Python it installs (an environment's `uv_pin`)."""
 
 load("//bazel:workspace.bzl", "tree_part")
 

@@ -1,4 +1,4 @@
-"""The public mirror's export (rola_devtools.mirror), in a throwaway git repository: every tracked path is declared, the
+"""The public mirror's export (fsla_devtools.mirror), in a throwaway git repository: every tracked path is declared, the
 longest declaration wins, the export holds only committed shipping files, and the tripwire refuses agent files and
 private-shaped strings, including in the tool's own text."""
 from __future__ import annotations
@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rola_devtools import mirror
+from fsla_devtools import mirror
 
 #: a home-directory path, joined so this file carries none; the fixtures below split their other private shapes the same
 #: way, so the file passes the tripwire it tests
@@ -69,7 +69,7 @@ class Mirror(unittest.TestCase):
         self.assertEqual(mirror.tripwire(scan, {}), [])
         for name, text, finding in [("csrc/CLAUDE.md", "notes", "an agent file"),
                                     ("docs/a/.claude/settings.json", "{}", "an agent file"),
-                                    ("docs/x.md", f"built at {SOMEONES_HOME}/rola", "a home directory"),
+                                    ("docs/x.md", f"built at {SOMEONES_HOME}/fsla", "a home directory"),
                                     ("docs/y.md", "contact someone" + "@gmail.com", "a personal email address"),
                                     ("tools/x.py", "token = 'ghp_" + "a" * 36 + "'", "a credential")]:
             path = scan / name
@@ -81,7 +81,7 @@ class Mirror(unittest.TestCase):
     def test_an_allowed_shape_passes_but_a_credential_can_never_be_allowed(self):
         scan = Path(self.tmp.name) / "scan"
         scan.mkdir()
-        (scan / "r.json").write_text(f'{{"rola_file": "{SOMEONES_HOME}/rola/__init__.py"}}')
+        (scan / "r.json").write_text(f'{{"fsla_file": "{SOMEONES_HOME}/fsla/__init__.py"}}')
         self.assertEqual(mirror.tripwire(scan, {"a home directory": "records name their checkout"}), [])
         bad = scan / "declarations.json"
         bad.write_text('{"public": "o/r", "ships": [], "private": [], "allow": {"a credential": "no"}}')

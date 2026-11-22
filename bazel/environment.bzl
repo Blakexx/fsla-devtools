@@ -1,13 +1,13 @@
-"""THE GRAPH'S ENVIRONMENT, every RoLA repository's: a module extension whose tags make the repositories a workspace's
+"""THE GRAPH'S ENVIRONMENT, every FSLA repository's: a module extension whose tags make the repositories a workspace's
 graph runs on -- a Python environment built from a lock into the machine's shared store (`python`), a release pinned
 by digest (`pinned`), the host C++ compiler's and the machine's devices' identities (`host_cc`, `host_gpu`), a pinned
 CUDA toolkit (`cuda_toolkit`) and the checkout's tracked files (`tree`). The root module names each repository and
 hands it the workspace's own pins and files; nothing here names a workspace. Docs: README.md#the-build-graph.
 
-    environment = use_extension("@rola_devtools//bazel:environment.bzl", "environment")
-    environment.pinned(name = "uv", pin = "@rola_devtools//pins:uv_pin.json", build = UV_BUILD)
+    environment = use_extension("@fsla_devtools//bazel:environment.bzl", "environment")
+    environment.pinned(name = "uv", pin = "@fsla_devtools//pins:uv_pin.json", build = UV_BUILD)
     environment.python(name = "env", lock = "//:requirements.lock", uv = "@uv//:uv",
-                       uv_pin = "@rola_devtools//pins:uv_pin.json")
+                       uv_pin = "@fsla_devtools//pins:uv_pin.json")
     environment.tree(name = "tree")
     use_repo(environment, "env", "tree", "uv")
 """
@@ -20,9 +20,9 @@ hands it the workspace's own pins and files; nothing here names a workspace. Doc
 #: workspace makes its own.
 
 def _store(rctx):
-    store = rctx.getenv("ROLA_GRAPH_STORE")
+    store = rctx.getenv("FSLA_GRAPH_STORE")
     if not store:
-        fail("ROLA_GRAPH_STORE is unset: run Bazel through its front door, `bazel` (rola_devtools.graph.front_door)")
+        fail("FSLA_GRAPH_STORE is unset: run Bazel through its front door, `bazel` (fsla_devtools.graph.front_door)")
     return store
 
 _PYTHON_BUILD = """\
@@ -52,10 +52,10 @@ def _python_impl(rctx):
         rctx.watch_tree(rctx.path(source).dirname)
     packages = []
     if rctx.attr.devtools:
-        #: rola_devtools from this module's own source -- the pinned commit's, or the machine's checkout overriding it --
+        #: fsla_devtools from this module's own source -- the pinned commit's, or the machine's checkout overriding it --
         #: staged as what its install reads, so the environment's key is the package's and not the repository's tests
         devtools = rctx.path(rctx.attr._devtools).dirname
-        rctx.watch_tree(devtools.get_child("rola_devtools"))
+        rctx.watch_tree(devtools.get_child("fsla_devtools"))
         staged = rctx.path("devtools_package")
         rctx.execute(["rm", "-rf", str(staged)])
         rctx.execute(["mkdir", "-p", str(staged)])
@@ -87,17 +87,17 @@ def _python_impl(rctx):
     if not rctx.attr.isolated_builds:
         args.append("--no-build-isolation")
     #: the store's bound, from the repository environment without recording it: a changed bound is not a new environment
-    for flag, name in (("--max-bytes", "ROLA_GRAPH_STORE_MAX_BYTES"), ("--max-age-days", "ROLA_GRAPH_STORE_MAX_AGE_DAYS")):
+    for flag, name in (("--max-bytes", "FSLA_GRAPH_STORE_MAX_BYTES"), ("--max-age-days", "FSLA_GRAPH_STORE_MAX_AGE_DAYS")):
         if rctx.os.environ.get(name):
             args += [flag, rctx.os.environ[name]]
     built = rctx.execute(args, timeout = 7200, quiet = False)
     if built.return_code != 0:
-        fail("the environment's store build failed (rola_devtools.graph.make_env):\n" + built.stderr)
+        fail("the environment's store build failed (fsla_devtools.graph.make_env):\n" + built.stderr)
     paths = json.decode(built.stdout.strip().splitlines()[-1])
     rctx.symlink(paths["site"], "site-packages")
     rctx.symlink(paths["include"], "python_include")
     rctx.symlink(paths["base"] + "/bin/python3", "bin/python3")
-    #: the repository is links into the store: a venv swept from the store (rola_devtools.graph.make_env) invalidates it
+    #: the repository is links into the store: a venv swept from the store (fsla_devtools.graph.make_env) invalidates it
     rctx.watch(paths["venv"] + "/.complete")
     facts = ""
     if rctx.attr.post:
@@ -105,7 +105,7 @@ def _python_impl(rctx):
         for name in rctx.attr.post_env:
             value = rctx.getenv(name)
             if not value:
-                fail("%s is unset: run Bazel through its front door, `bazel` (rola_devtools.graph.front_door)" % name)
+                fail("%s is unset: run Bazel through its front door, `bazel` (fsla_devtools.graph.front_door)" % name)
             environment[name] = value
         post = rctx.execute([paths["python"], rctx.path(rctx.attr.post)] + [str(rctx.path(f)) for f in rctx.attr.post_args],
                             timeout = 600, environment = environment)
@@ -118,8 +118,8 @@ def _python_impl(rctx):
     rctx.file("BUILD.bazel", _build(rctx, _PYTHON_BUILD))
     return rctx.repo_metadata(reproducible = True)
 
-#: what rola_devtools' install reads of its repository: the project file, the files it names, the package
-_DEVTOOLS_INSTALLS = ("pyproject.toml", "LICENSE", "README.md", "rola_devtools")
+#: what fsla_devtools' install reads of its repository: the project file, the files it names, the package
+_DEVTOOLS_INSTALLS = ("pyproject.toml", "LICENSE", "README.md", "fsla_devtools")
 
 _python_attrs = {
     "lock": attr.label(mandatory = True, doc = "the hash-pinned lock (`uv pip compile --generate-hashes`)"),
@@ -128,7 +128,7 @@ _python_attrs = {
     "index": attr.string(default = "", doc = "an extra index the lock's packages come from (a torch index)"),
     "index_from": attr.label(allow_single_file = True, doc = "or a JSON file whose `index_field` names that index"),
     "index_field": attr.string(default = "torch_index", doc = "the field of `index_from` that names the index"),
-    "devtools": attr.bool(default = True, doc = "rola_devtools from this module's source, after the lock"),
+    "devtools": attr.bool(default = True, doc = "fsla_devtools from this module's source, after the lock"),
     "packages": attr.string_list(doc = "requirements pinned by commit (`name @ git+URL@COMMIT`), after the lock"),
     "isolated_builds": attr.bool(default = True, doc = "build each package apart from the environment; False builds " +
                                                          "against it, for a package whose build imports a locked one " +
@@ -145,7 +145,7 @@ _python_attrs = {
 _python_repo = repository_rule(
     implementation = _python_impl,
     attrs = _python_attrs | {
-        "make_env": attr.label(default = "//rola_devtools/graph:make_env.py"),
+        "make_env": attr.label(default = "//fsla_devtools/graph:make_env.py"),
         "_devtools": attr.label(default = "//:pyproject.toml"),
     },
     doc = "A Python environment: a lock built once a key into the shared store, and `flags.bzl` with its venv's path.",

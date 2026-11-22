@@ -1,7 +1,7 @@
-# THE PUBLIC MIRROR. A push to the default branch publishes: rola_devtools.mirror writes HEAD's shipping files and
+# THE PUBLIC MIRROR. A push to the default branch publishes: fsla_devtools.mirror writes HEAD's shipping files and
 # refuses an export with an undeclared path, an agent file or a private-shaped string; the export is then committed as
 # one snapshot on the public repository's main, on top of the snapshots before it, naming the commit it was taken
-# from. See rola-devtools' README.
+# from. See fsla-devtools' README.
 name: mirror-to-public
 
 on:
@@ -19,12 +19,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Export and tripwire
-        run: pip install . && python3 -m rola_devtools.mirror /tmp/export
+        run: pip install . && python3 -m fsla_devtools.mirror /tmp/export
       - name: Commit the export as a snapshot on the public mirror
         env:
           MIRROR_KEY: ${{ secrets.MIRROR_KEY }}
         run: |
-          PUBLIC="$(python3 -m rola_devtools.mirror --public)"
+          PUBLIC="$(python3 -m fsla_devtools.mirror --public)"
           SOURCE="${GITHUB_REPOSITORY#*/}@${GITHUB_SHA::12}"
           mkdir -p ~/.ssh && echo "$MIRROR_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null

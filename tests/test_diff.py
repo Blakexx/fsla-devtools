@@ -13,14 +13,14 @@ from pathlib import Path
 
 import torch
 
-from rola_devtools import config
-from rola_devtools.build.cache import Cache
-from rola_devtools.build.declare import Env, Graph
-from rola_devtools.build.runtime import Runtime
-from rola_devtools.build.scheduler import build
-from rola_devtools.cells.declare import cells as cell_nodes
-from rola_devtools.diff import diff, side
-from rola_devtools.diff.strategies import bit_identical, per_slot, support_equal
+from fsla_devtools import config
+from fsla_devtools.build.cache import Cache
+from fsla_devtools.build.declare import Env, Graph
+from fsla_devtools.build.runtime import Runtime
+from fsla_devtools.build.scheduler import build
+from fsla_devtools.cells.declare import cells as cell_nodes
+from fsla_devtools.diff import diff, side
+from fsla_devtools.diff.strategies import bit_identical, per_slot, support_equal
 
 HERE = Path(__file__).resolve().parent
 
@@ -163,7 +163,7 @@ class Node(unittest.TestCase):
         g = Graph()
         nodes = cell_nodes(g, ["corner-anti"])
         out = self.go([side(g, "bound", env=self.env(), executor="fake_sides:flat", cells=nodes, holds={},
-                            binds="rola_devtools")])
+                            binds="fsla_devtools")])
         self.assertEqual(out["bound"].status, "failed")
         self.assertIn("which is outside it", out["bound"].detail)
 

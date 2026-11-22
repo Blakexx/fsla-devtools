@@ -1,6 +1,6 @@
 {
     "name": "uv",
-    "role": "every RoLA workspace's environment builder (rola_devtools' environment extension, its `python` tag): it installs the pinned Python (`python`) and syncs a lock's hash-pinned packages into the machine's shared store, one environment a key. A graph downloads it by this digest.",
+    "role": "every FSLA workspace's environment builder (fsla_devtools' environment extension, its `python` tag): it installs the pinned Python (`python`) and syncs a lock's hash-pinned packages into the machine's shared store, one environment a key. A graph downloads it by this digest.",
     "upstream": "https://github.com/astral-sh/uv (the release's wheel on PyPI, by PyPI's digest: the wheel carries the uv binary)",
     "version": "0.12.7",
     "release_asset": "uv-0.12.7-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",

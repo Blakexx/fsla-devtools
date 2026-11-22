@@ -1,33 +1,33 @@
-# rola-devtools
+# fsla-devtools
 
-The development tools every RoLA repository shares. Standard library only, so every venv, CI job and container can
+The development tools every FSLA repository shares. Standard library only, so every venv, CI job and container can
 carry it. It is a development dependency: nothing a user installs imports it.
 
 | Module | What it is |
 |---|---|
-| `rola_devtools.mirror` | the public mirror's export, run by each repository's commit gate and its mirror workflow |
-| `rola_devtools.cells` | the central cell registry: every input a RoLA measurement or test runs on (carry, layer, producer, QKV), its draw, its seed and the regime it proves, named once; bases and the cells derived from them; each cell declarable as a build NODE whose output is its record |
-| `rola_devtools.build` | the declared build system: targets declared by composable functions in files, keyed by what they read, cached or run in dependency order, holding the machine's resources, each in its own environment's worker |
-| `rola_devtools.timing` | the timing system, as targets: a server of entry workers, registrations of timed callables on cells, interleaved clock-locked sessions, memory passes, null gates |
-| `rola_devtools.diff` | the diff targets: two executors run over the same cells in the environments they name, compared under one rule (bit-identity, the per-slot clause rule, support equality), with a claim the build can fail on -- a difference expected or refused |
-| `rola_devtools.store` | the store target: a result written through rola-results as a run-stamped sample of its source's record |
-| `rola_devtools.verdict` | whether a candidate's timing is a regression against a reference timed in the same sessions: effect size, paired significance, persistence |
-| `rola_devtools.process` | `subprocess.run` for a command that starts processes of its own: a timeout or an interrupt stops the whole tree |
-| `rola_devtools.config` | the dev config reader: one directory of JSON files a section, every key declared; the machine's `host` and `clock` sections every repository shares |
-| `rola_devtools.locks` | the machine's locks: the GPU lock (exclusive or shared), the host-compute budget and named file locks, the SM clock lock |
-| `rola_devtools.graph` | the build graph's shared machinery: the front door every repository's Bazel runs through, the environment's store builder, the test tiers' sharding plugin |
+| `fsla_devtools.mirror` | the public mirror's export, run by each repository's commit gate and its mirror workflow |
+| `fsla_devtools.cells` | the central cell registry: every input an FSLA measurement or test runs on (carry, layer, producer, QKV), its draw, its seed and the regime it proves, named once; bases and the cells derived from them; each cell declarable as a build NODE whose output is its record |
+| `fsla_devtools.build` | the declared build system: targets declared by composable functions in files, keyed by what they read, cached or run in dependency order, holding the machine's resources, each in its own environment's worker |
+| `fsla_devtools.timing` | the timing system, as targets: a server of entry workers, registrations of timed callables on cells, interleaved clock-locked sessions, memory passes, null gates |
+| `fsla_devtools.diff` | the diff targets: two executors run over the same cells in the environments they name, compared under one rule (bit-identity, the per-slot clause rule, support equality), with a claim the build can fail on -- a difference expected or refused |
+| `fsla_devtools.store` | the store target: a result written through fsla-results as a run-stamped sample of its source's record |
+| `fsla_devtools.verdict` | whether a candidate's timing is a regression against a reference timed in the same sessions: effect size, paired significance, persistence |
+| `fsla_devtools.process` | `subprocess.run` for a command that starts processes of its own: a timeout or an interrupt stops the whole tree |
+| `fsla_devtools.config` | the dev config reader: one directory of JSON files a section, every key declared; the machine's `host` and `clock` sections every repository shares |
+| `fsla_devtools.locks` | the machine's locks: the GPU lock (exclusive or shared), the host-compute budget and named file locks, the SM clock lock |
+| `fsla_devtools.graph` | the build graph's shared machinery: the front door every repository's Bazel runs through, the environment's store builder, the test tiers' sharding plugin |
 
-The `rola_devtools` Bazel module (`MODULE.bazel`, `bazel/`) is the rest of the build graph's machinery: its
+The `fsla_devtools` Bazel module (`MODULE.bazel`, `bazel/`) is the rest of the build graph's machinery: its
 environment extension and generic rules (below).
 
 ## The public mirror
 
-Each RoLA project lives in two places: a private development repository, where every branch is pushed, and a public
+Each FSLA project lives in two places: a private development repository, where every branch is pushed, and a public
 repository holding what has been published. A push to the development repository's default branch publishes.
 
 **What ships.** `.github/mirror/declarations.json` in the repository declares every tracked path. `ships` and `private`
 list path prefixes, and a path takes the longest entry it falls under, so a directory can ship while one file inside it
-stays private. A tracked path under no entry refuses the export, and `python -m rola_devtools.mirror --check` refuses it
+stays private. A tracked path under no entry refuses the export, and `python -m fsla_devtools.mirror --check` refuses it
 at commit time: a new file never ships, and never silently stays behind, until someone declares it. The list names what
 ships rather than what hides, because a list of hidden things fails open on the file nobody anticipated.
 
@@ -44,9 +44,9 @@ it came from, and pushes with the development repository's `MIRROR_KEY` secret (
 on the public repository).
 
 ```bash
-python -m rola_devtools.mirror /tmp/export   # the export of HEAD, with any refusal
-python -m rola_devtools.mirror --check       # every tracked path declared
-python -m rola_devtools.mirror --public      # the public repository
+python -m fsla_devtools.mirror /tmp/export   # the export of HEAD, with any refusal
+python -m fsla_devtools.mirror --check       # every tracked path declared
+python -m fsla_devtools.mirror --public      # the public repository
 ```
 
 ## The declared build system
@@ -61,8 +61,8 @@ files from several checkouts:
 
 ```python
 def root(g, target):
-    rola = load(Path(target) / "declare.py")
-    tip = rola["declare"](g.scoped("tip"), rola["checkout"](target, python=..., label="tip"), cells=["flagship-dense"])
+    fsla = load(Path(target) / "declare.py")
+    tip = fsla["declare"](g.scoped("tip"), fsla["checkout"](target, python=..., label="tip"), cells=["flagship-dense"])
     return {"all": g.group("all", [tip["binary"], *tip["instruments"].values()])}
 ```
 
@@ -76,13 +76,13 @@ exception is a BUILD failure: the build stops scheduling and only `always_run` t
 as failed inside its own output (a timing entry whose kernel is not built) is its domain's, and the build goes on.
 
 ```bash
-python -m rola_devtools.build plan declare.py:all
-python -m rola_devtools.build run  declare.py:all --only 'rola/phases' --skip '*/timeline'   # prune by label
+python -m fsla_devtools.build plan declare.py:all
+python -m fsla_devtools.build run  declare.py:all --only 'fsla/phases' --skip '*/timeline'   # prune by label
 ```
 
 ## The timing system
 
-Timing is a client of the build system (`rola_devtools.timing`). `start_timing_server` starts a pool of entry workers,
+Timing is a client of the build system (`fsla_devtools.timing`). `start_timing_server` starts a pool of entry workers,
 one per checkout environment; `register_timing` is one target registering a checkout's timed callable on every cell it
 takes, as ENTRIES; `measure_timing` is a session over the entries of any registrations: every entry set up behind a
 barrier, warmed past a floor of 10 calls, then called one at a time in a fresh random order each rep, with the entry's
@@ -91,13 +91,13 @@ and after. The session keeps every sample in the order taken, with its round, re
 reference is chosen when the samples are read. An entry that cannot set up is recorded as that member's failure; two
 stopwatches or a clock off the lock fail the build. `measure_memory` takes each entry alone, and `measure_null_gate`
 times one registration's entries against copies of themselves in second workers, finding a worker's bias.
-`rola_devtools.store.store` writes a target's result through rola-results as a run-stamped sample of the record its
+`fsla_devtools.store.store` writes a target's result through fsla-results as a run-stamped sample of the record its
 source's semantics key.
 
 ## The diff
 
 "The same function in two checkouts" and "the kernel against its fp64 reference" are the same question asked twice, so
-`rola_devtools.diff` asks it once. `side` is one side of a comparison: an executor run in the environment it names over
+`fsla_devtools.diff` asks it once. `side` is one side of a comparison: an executor run in the environment it names over
 every cell TARGET it takes, writing its tensors into its own node's workspace. `diff` takes two sides and one named
 STRATEGY -- `bit-identical` (a change that claims to have moved no number), `per-slot` (the oracle's clause rule: a slot
 of size `s` may be off by `max(r*s, a)` under each `(r, a)` clause of its output kind, and by `rtol * envelope` where
@@ -123,7 +123,7 @@ side ran measured nothing.
 ## The verdict
 
 Timing is comparable only within the session that interleaved it, so the verdict reads within-session quantities.
-`rola_devtools.verdict.session(candidate, reference)` takes one session's two arms, each its samples by round, and gives
+`fsla_devtools.verdict.session(candidate, reference)` takes one session's two arms, each its samples by round, and gives
 per round each arm's median, their ratio and their difference. `classify(sessions)` calls the last of a candidate's
 sessions against one reference a regression only when three gates fire: the session's median ratio is above one plus
 three sigmas of its per-round ratios' own spread (sigma from the interquartile range, never below what the stopwatch
@@ -131,24 +131,24 @@ resolves, never a flat percentage); an exact Wilcoxon signed-rank test over its 
 least 8 rounds, the floor the alpha itself sets) says the candidate is slower; and the violation persists, a trailing run
 of at least two sessions over their own limits. Anything less is reported as what it is: `flagged_not_confirmed`,
 `suspicious`, `insufficient_data` or `no_regression`. It takes plain samples; which stored sessions and which reference
-are read is a query over the store (`python -m rola_results verdict --reference LABEL`).
+are read is a query over the store (`python -m fsla_results verdict --reference LABEL`).
 
 ## The central cell registry
 
-A cell is an input, named once for every package: `rola_devtools/cells/carry.json` (a routed recurrence's routing
+A cell is an input, named once for every package: `fsla_devtools/cells/carry.json` (a sparse recurrence's routing
 amplitudes, gain, values and the state it enters with, including the state's backing), `layer.json` (a layer's hidden
 states and values) and `qkv.json` (attention's queries, keys and values). A record holds the input and never how a
-package runs it -- a kernel's launch shape, RoLA's routing widths or gain, an attention backend are an arm's -- so two
+package runs it -- a kernel's launch shape, FSLA's routing widths or gain, an attention backend are an arm's -- so two
 arms on one cell read the same tensors, and when the registry changes, a package that no longer fits it is what changes.
 
 ```python
-from rola_devtools.cells import cell, carry
+from fsla_devtools.cells import cell, carry
 
 drawn = carry.realize(cell("flagship-alt-k4"))   # bf16 read/write levels, gain, v; the entry state of a carried cell
 ```
 
 Every carry cell but the two degenerate ones declares where in the routing distribution it sits on six axes (density,
-coherence, read/write correlation, mass, tail, support; `rola_devtools.cells.regimes`), and `realize` proves the draw is
+coherence, read/write correlation, mass, tail, support; `fsla_devtools.cells.regimes`), and `realize` proves the draw is
 there before returning it. Every cell states the seed its data is drawn from, so a failure reproduces from the record.
 A base (`bases.json`) is a fragment, never a cell; a derived cell merges the bases its `from` lists in order, and `vary`
 with a name pattern makes one cell per value. Loading and checking the registry needs only the standard library;
@@ -156,19 +156,19 @@ realizing a cell needs torch.
 
 ## The dev config and the machine's locks
 
-Every value that depends on the machine lives in one directory of JSON files, one a section: `~/.config/rola/`, or the
-directory `ROLA_DEV_CONFIG` names (a container, a test). A schema declares each section's keys with a kind, a default and
+Every value that depends on the machine lives in one directory of JSON files, one a section: `~/.config/fsla/`, or the
+directory `FSLA_DEV_CONFIG` names (a container, a test). A schema declares each section's keys with a kind, a default and
 a meaning; a key a file holds that its section does not declare is refused, so a typo fails instead of silently taking
-a default. `rola_devtools.config.MACHINE` declares the sections every repository shares -- `host` (lock paths, the
+a default. `fsla_devtools.config.MACHINE` declares the sections every repository shares -- `host` (lock paths, the
 compute budget, niceness) and `clock` (the SM clock the harness locks) -- and `machine("host.gpu_lock")` reads one value.
-A repository with sections of its own (rola's toolchain, store and workspace) reads its whole schema with
+A repository with sections of its own (fsla's toolchain, store and workspace) reads its whole schema with
 `read(schema, owns_directory=True)`, which also refuses a file no section declares.
 
 The locks read only those sections, so one host and its containers share one of each:
 
 ```python
-from rola_devtools.locks.gpu import gpu_lock
-from rola_devtools.locks import host
+from fsla_devtools.locks.gpu import gpu_lock
+from fsla_devtools.locks import host
 
 with gpu_lock():                      # a measurement: the device to itself (mode="shared" for a correctness run)
     ...
@@ -176,21 +176,21 @@ with host.acquire(4, label="tidy"):   # up to 4 host-compute slots, at least one
     ...
 ```
 
-`python -m rola_devtools.locks.host [--slots N] [--exclusive] -- <command...>` runs a command under the budget, and
-`python -m rola_devtools.locks.gpu [--shared] -- <command...>` one under the GPU lock (a binary with no `gpu_lock()` of
+`python -m fsla_devtools.locks.host [--slots N] [--exclusive] -- <command...>` runs a command under the budget, and
+`python -m fsla_devtools.locks.gpu [--shared] -- <command...>` one under the GPU lock (a binary with no `gpu_lock()` of
 its own: `cuda-gdb`, `ncu` by hand). A nested
 acquire in the same process or a child is a no-op, so an outer tool that locks can start an inner tool that locks.
-`rola_devtools.locks.clock.engage(read_ghz)` locks the clock the host declares, proves it with the device's own reading,
+`fsla_devtools.locks.clock.engage(read_ghz)` locks the clock the host declares, proves it with the device's own reading,
 and unlocks on every exit.
 
 ## The build graph
 
-Every RoLA repository builds and checks itself with Bazel, through the same machinery: this repository's Bazel module.
+Every FSLA repository builds and checks itself with Bazel, through the same machinery: this repository's Bazel module.
 A repository depends on it at a public commit (`bazel_dep` plus a `git_override` in its `MODULE.bazel`, the one pin of
-rola-devtools it has).
+fsla-devtools it has).
 
 **The front door.** bazelisk runs a repository's `bazel/bazel` (the wrapper its `.bazeliskrc` names) in place of the
-Bazel it downloaded; that stub runs `rola_devtools.graph.front_door`, found through the machine's rola-devtools checkout,
+Bazel it downloaded; that stub runs `fsla_devtools.graph.front_door`, found through the machine's fsla-devtools checkout,
 so every Bazel command in a checkout goes through one implementation. It hands Bazel the machine's settings from the
 dev config (the shared caches and the environment's store), overrides the repository's pin of this module with the
 machine's checkout (an rc file of the workspace's own), so a change made here is the one every graph on the machine
@@ -200,7 +200,7 @@ runs, and holds the host budget around each build phase. `bazel --commit-gate` i
 
 | Tag | Repository |
 |---|---|
-| `python` | a Python environment: the pinned CPython, a hash-pinned lock's packages, then packages pinned by commit and this module's `rola_devtools`, built once a key into the machine's shared store (`rola_devtools.graph.make_env`); `isolated_builds = False` builds the pinned packages against the environment, for one whose build imports a locked package |
+| `python` | a Python environment: the pinned CPython, a hash-pinned lock's packages, then packages pinned by commit and this module's `fsla_devtools`, built once a key into the machine's shared store (`fsla_devtools.graph.make_env`); `isolated_builds = False` builds the pinned packages against the environment, for one whose build imports a locked package |
 | `pinned` | a release pinned by URL and digest (uv, mold, clang-tidy) |
 | `cuda_toolkit` | a CUDA toolkit from NVIDIA's redistributables, pinned by their manifest's digest (which carries each component's) |
 | `host_cc`, `host_gpu` | the host C++ compiler's and the machine's devices' identities, which actions that depend on them are keyed on |
@@ -230,12 +230,12 @@ bazel test //:gate
 ```
 
 The gate is ruff, its blank-line family, the tests and the mirror's declaration check, on the graph's own environment.
-The commit gate (`.githooks/pre-commit` -> `bazel/bazel --commit-gate`, every RoLA repository's hook) runs `//:gate` on
+The commit gate (`.githooks/pre-commit` -> `bazel/bazel --commit-gate`, every FSLA repository's hook) runs `//:gate` on
 the commit as git will write it: the changes not staged set aside, the tree the commit's index.
 
 ## Publishing
 
-Developed in the private `rola-devtools-dev`, published to the public `rola-devtools` by its own mirror.
+Developed in the private `fsla-devtools-dev`, published to the public `fsla-devtools` by its own mirror.
 
 ## License
 

@@ -3,9 +3,9 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rola-devtools"
+name = "fsla-devtools"
 version = "0.1.0"
-description = "The development tools every RoLA repository shares: the public mirror's export, the cell registry, the interleaving driver and the measurement build system"
+description = "The development tools every FSLA repository shares: the public mirror's export, the cell registry, the interleaving driver and the measurement build system"
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [{ name = "Blake Bottum" }]
@@ -13,11 +13,11 @@ authors = [{ name = "Blake Bottum" }]
 dependencies = []
 
 [tool.setuptools.packages.find]
-include = ["rola_devtools*"]
+include = ["fsla_devtools*"]
 
 [tool.setuptools.package-data]
 # the central cell registry's records
-"rola_devtools.cells" = ["*.json"]
+"fsla_devtools.cells" = ["*.json"]
 
 [tool.ruff]
 line-length = 127

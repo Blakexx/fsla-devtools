@@ -11,12 +11,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rola_devtools import config
-from rola_devtools.build.cache import Cache
-from rola_devtools.build.declare import Env, Graph, load
-from rola_devtools.build.runtime import Runtime
-from rola_devtools.build.scheduler import build
-from rola_devtools.cells import Registry
+from fsla_devtools import config
+from fsla_devtools.build.cache import Cache
+from fsla_devtools.build.declare import Env, Graph, load
+from fsla_devtools.build.runtime import Runtime
+from fsla_devtools.build.scheduler import build
+from fsla_devtools.cells import Registry
 
 HERE = Path(__file__).resolve().parent
 DECLARE = '''
@@ -98,7 +98,7 @@ class Declared(unittest.TestCase):
     def test_the_cache_sweeps_old_runs_and_evicts_the_least_recently_read_keys(self):
         """A cache that only grows is a disk that only shrinks. Runs go by age, keys by LAST READ -- and a key a build
         just hit is the one that survives, which is the whole difference between an LRU and a coin toss."""
-        from rola_devtools.build.cache import Cache
+        from fsla_devtools.build.cache import Cache
 
         cache = Cache(self.root / "swept")
         for run in ("r1", "r2", "r3"):
@@ -118,7 +118,7 @@ class Declared(unittest.TestCase):
 
     def test_selection_is_by_label_pattern_and_a_skipped_dependency_drops_its_dependents(self):
         """THE ONE SELECTION MECHANISM, and it knows nothing of what a label means."""
-        from rola_devtools.build.scheduler import select
+        from fsla_devtools.build.scheduler import select
 
         g = Graph()
         a = g.node("cells/a", executor="fake_executors:record", params={"cell": "t8"}, cache=False)
@@ -191,7 +191,7 @@ class Declared(unittest.TestCase):
 
 class Identity(unittest.TestCase):
     def test_a_code_key_follows_imports_inside_the_root_and_moves_with_their_bytes(self):
-        from rola_devtools.build import identity
+        from fsla_devtools.build import identity
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

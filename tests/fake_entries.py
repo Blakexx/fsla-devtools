@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import os
 
-from rola_devtools.timing import Timed
+from fsla_devtools.timing import Timed
 
 
 def fixed(cell, params) -> Timed:
     ms = params["ms"] * cell.tokens
-    return Timed(call=lambda: ms, built={"ms": ms, "held": os.environ.get("ROLA_GPU_LOCK_HELD"), "pid": os.getpid()},
+    return Timed(call=lambda: ms, built={"ms": ms, "held": os.environ.get("FSLA_GPU_LOCK_HELD"), "pid": os.getpid()},
                  instrument="fixed")
 
 
