@@ -3,3 +3,6 @@ __pycache__/
 *.egg-info/
 /build/
 .ruff_cache/
+
+# Bazel output links (.bazelrc: --symlink_prefix=.bazel/)
+/.bazel/

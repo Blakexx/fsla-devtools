@@ -6,6 +6,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True  # the front door runs from the checkout: it leaves no bytecode there
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from rola_devtools.graph import front_door  # noqa: E402 -- the path insert above must precede it
