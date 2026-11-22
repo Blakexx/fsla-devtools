@@ -48,10 +48,7 @@ hook, `--range A..B` (any `git log` revisions) in the pre-push hook, over every 
 and removed inside the push still refuses it; `--tree` reads HEAD whole. A refusal is a line
 `TRIPWIRE REFUSED: path:line: the check`. Files declared `private` are not read.
 
-**The snapshot.** Each repository's `.github/workflows/mirror.yml` installs this package at a pinned commit, runs the
-export on the pushed commit, commits the export on top of the public repository's `main` naming the development commit
-it came from, and pushes with the development repository's `MIRROR_KEY` secret (the private half of a write deploy key
-on the public repository).
+**This repository.** It is developed in public: it has no mirror workflow, and its declarations remain for the tripwire (`agent_files`, `emails`) and the gate's declaration check. Other repositories' `mirror.yml` installs this package at a pinned commit of this repository.
 
 ```bash
 python -m fsla_devtools.mirror /tmp/export   # the export of HEAD, with any refusal
@@ -245,7 +242,7 @@ the commit as git will write it: the changes not staged set aside, the tree the 
 
 ## Publishing
 
-Developed in the private `fsla-devtools-dev`, published to the public `fsla-devtools` by its own mirror.
+This repository is developed in public: `Blakexx/fsla-devtools` is the development repository itself, with its whole history, and has no mirror. The earlier snapshot repository is archived as `Blakexx/fsla-devtools-snapshots`.
 
 ## License
 
