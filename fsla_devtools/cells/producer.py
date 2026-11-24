@@ -11,8 +11,7 @@ SUPPORT ENDS. A cell therefore declares its `scale`, because the scale is the ax
           about which digits survive at all
 
 `mask` is a RAGGED one when a cell declares it, never a uniform one: padding past a level's logical width is what a
-kernel's mask does, and a uniform mask exercises none of the boundary the mask exists for. `pairs` makes the cell a
-COMPOSED one: two independent logit tensors, a read side and a write side, for the union split that follows the solve.
+kernel's mask does, and a uniform mask exercises none of the boundary the mask exists for.
 
 Symbols, each at first use: `width` = the level's digit count, `rows` = independent logit rows drawn, `alpha` = the
 entmax parameter (1.5 is the sparse producer, 2 is sparsemax).
@@ -36,14 +35,10 @@ class ProducerCell:
     alpha: float = 1.5
     rows: int = 8
     masked: bool = False
-    #: a composed cell: a read side and a write side, drawn independently, for the union split
-    pairs: bool = False
-    #: the leading dimensions a paired cell's logits carry (`[B, L, width]`), so the split is exercised over a batch
-    lead: tuple = ()
 
     @property
     def shape(self) -> tuple:
-        return (*self.lead, self.rows, self.width) if self.lead else (self.rows, self.width)
+        return (self.rows, self.width)
 
 
 def producer_cell(name: str, **params) -> ProducerCell:
@@ -51,8 +46,6 @@ def producer_cell(name: str, **params) -> ProducerCell:
     unknown = sorted(set(params) - {f.name for f in fields(ProducerCell)})
     if unknown:
         raise ValueError(f"{name}: undeclared field(s) {unknown}")
-    if "lead" in params:
-        params["lead"] = tuple(params["lead"])
     cell = ProducerCell(name, **params)
     if cell.alpha not in ALPHAS:
         raise ValueError(f"{name}: alpha {cell.alpha} is not one a shipped producer solves at {ALPHAS}")
@@ -62,7 +55,7 @@ def producer_cell(name: str, **params) -> ProducerCell:
 
 
 def realize(cell: ProducerCell, device: str = "cpu"):
-    """`(logits, mask)` for a plain cell, `(read_logits, write_logits, mask)` for a paired one.
+    """`(logits, mask)`: the cell's logit rows and its mask, or `None` where it declares none.
 
     fp64 and on the CPU by default: the producer's reference is a pure-torch fp64 object, and what is being compared
     is arithmetic rather than a launch.
@@ -78,8 +71,6 @@ def realize(cell: ProducerCell, device: str = "cpu"):
         flat = mask.reshape(-1, cell.width)
         for row in range(flat.shape[0]):
             flat[row, max(1, cell.width - row % cell.width):] = False
-    if cell.pairs:
-        return draw(), draw(), mask
     return draw(), mask
 
 

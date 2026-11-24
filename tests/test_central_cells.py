@@ -190,10 +190,6 @@ class Realized(unittest.TestCase):
         self.assertGreater(far.std().item(), 10 * near_dense.std().item())
         live = ragged.sum(dim=-1)
         self.assertEqual(len(set(live.tolist())), 8)  #: a different live width per row
-        #: a paired cell is two INDEPENDENT sides, because the union split may never assume they agree
-        read, write, _ = producer.realize(cell("producer-union-w16-s3"))
-        self.assertEqual(tuple(read.shape), (2, 5, 16))
-        self.assertFalse(torch.equal(read, write))
 
     def test_a_producer_cell_refuses_an_alpha_no_shipped_producer_solves(self):
         with self.assertRaises(ValueError):
