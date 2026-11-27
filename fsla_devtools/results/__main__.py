@@ -1,4 +1,4 @@
-"""python -m fsla_devtools.results [--root RECORDS] check [--admitted FILE] | check-files DIR [--admitted FILE] |
+"""python -m fsla_devtools.results [--root RECORDS] check | check-files DIR |
 show [LOCATION] | commit -m MESSAGE | index [--db FILE] | sql QUERY | history|latest LOCATION | verdict |
 instruments --baseline RUN | dashboard --out FILE"""
 from __future__ import annotations
@@ -18,33 +18,19 @@ _COMMITS = ("coalesce(json_extract(s.provenance, '$.git_sha'), (SELECT group_con
             "FROM json_each(s.provenance, '$.checkouts') c))")
 
 
-def admitted(file: Path | None, under: Path) -> dict[str, list[str]]:
-    """The machine paths `file` admits (a JSON mapping of a file's path, relative to `file`'s directory, to the paths it
-    is known to carry), keyed by each file's path under `under`."""
-    if file is None:
-        return {}
-    base, under = file.resolve().parent, under.resolve()
-    listed = {(base / name).resolve(): paths for name, paths in json.loads(file.read_text()).items()}
-    return {str(path.relative_to(under)): paths for path, paths in listed.items() if path.is_relative_to(under)}
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(prog="python -m fsla_devtools.results")
     ap.add_argument("--root", type=Path, help="the records directory (default: records/ of the dev config's store.root)")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, what in (("check", "every record's key recomputes, its location is its directory, its outputs exist, and "
-                                 "none carries a machine path"),
-                       ("check-files", "every file of a directory parses (JSON, CSV) and none carries a machine path")):
+    for name, what in (("check", "every record's key recomputes, its location is its directory, its outputs exist"),
+                       ("check-files", "every file of a directory parses (JSON, CSV)")):
         p = sub.add_parser(name, help=what)
         if name == "check-files":
             p.add_argument("directory", type=Path)
-        p.add_argument("--admitted", type=Path, help="the machine paths stored before the store refused every one "
-                                                     "(a file's path -> the paths it carries)")
     show = sub.add_parser("show", help="the locations, or one location's records")
     show.add_argument("location", nargs="?")
     commit = sub.add_parser("commit", help="commit the records in the backend's git repository")
     commit.add_argument("-m", "--message", required=True)
-    commit.add_argument("--admitted", type=Path, help="as for check")
     built = sub.add_parser("index", help="bring the derived SQLite database up to date (the machine's cache, or --db)")
     built.add_argument("--db", type=Path, help="the database to write (default: the machine's cache)")
     sql = sub.add_parser("sql", help="run a query on the database (tables records, samples; the views)")
@@ -76,7 +62,7 @@ def main() -> int:
     a = ap.parse_args()
 
     if a.cmd == "check-files":
-        problems = check_files(a.directory, admitted(a.admitted, a.directory))
+        problems = check_files(a.directory)
         print("\n".join(problems) or f"{a.directory}: {sum(1 for p in a.directory.rglob('*') if p.is_file())} files, "
               "all consistent")
         return 1 if problems else 0
@@ -133,7 +119,7 @@ def main() -> int:
         return 0
 
     if a.cmd == "check":
-        problems = check(root, admitted(a.admitted, root))
+        problems = check(root)
         print("\n".join(problems) or f"records: {sum(1 for _ in root.rglob('*.json'))} files under {len(locations(root))} "
               "locations, all consistent")
         return 1 if problems else 0
@@ -149,7 +135,7 @@ def main() -> int:
             print(f"{record['key']}  {ok} ok / {len(record['samples']) - ok} failed  last {last.get('utc', '-')}")
         return 0
 
-    problems = check(root, admitted(a.admitted, root))
+    problems = check(root)
     if problems:
         print("\n".join(problems), file=sys.stderr)
         return 1

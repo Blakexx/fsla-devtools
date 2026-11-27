@@ -1,7 +1,7 @@
 """The store's contract, on a temporary backend (no GPU): one record a semantics with every sample kept, a location of
 plain names, an output file moved in, a checkout's identity or a failure to read it, a timing refused without a commit,
-and no machine path in anything stored -- any absolute path, refused at the door and found by the check, but for the
-paths a legacy file is admitted to carry. `python -m unittest tests.test_results_store`"""
+and no machine path in anything written -- a path in someone's home directory, refused at the door, while a system path is
+kept and a stored record is checked for its consistency alone. `python -m unittest tests.test_results_store`"""
 from __future__ import annotations
 
 import json
@@ -150,26 +150,22 @@ class StoreContract(unittest.TestCase):
                                               "url": "https://example.com/a/b", "home": "~/venv/bin/python"})
         self.assertEqual(check(self.root), [])
 
-    def test_check_finds_a_machine_path_written_around_the_store_but_the_admitted(self) -> None:
-        sem = {"cell": "q"}
-        sample = self.store.put(sem, output={"fsla_file": "fsla/__init__.py"})
+    def test_a_stored_record_is_checked_for_consistency_and_a_system_path_is_kept(self) -> None:
+        """The path rule is the writer's: a record stored before it, never rewritten, is checked for its consistency alone;
+        and a system path is a fact of the environment, kept where a sample is written."""
+        sample = self.store.put({"cell": "q"}, output={"python": "/opt/venv/bin/python", "cuda": "/usr/local/cuda"})
         (self.store.dir / sample["output"]).write_text(json.dumps({"fsla_file": f"{BOX}/fsla/__init__.py"}))
-        self.assertTrue(any("machine paths" in p for p in check(self.root)))
-        where = f"tool/sub/{sample['output']}"
-        self.assertEqual(check(self.root, {where: [f"{BOX}/fsla/__init__.py"]}), [])
-        self.assertTrue(any("machine paths" in p for p in check(self.root, {where: [f"{BOX}/other"]})))
+        self.assertEqual(check(self.root), [])
 
-    def test_a_directory_of_kept_files_parses_and_names_no_machine_path(self) -> None:
+    def test_a_directory_of_kept_files_parses(self) -> None:
         lab = self.root / "lab"
         (lab / "add_rate").mkdir(parents=True)
         (lab / "add_rate" / "sm_90a.json").write_text(json.dumps({"rows": [1, 2]}))
         (lab / "add_rate" / "ledger.csv").write_text(f"==PROF== Connected to process 1 ({BOX}/add_rate)\na,b\n1,2\n")
-        self.assertEqual(check_files(lab), ["add_rate/ledger.csv: carries machine paths ['" + BOX + "/add_rate']"])
-        self.assertEqual(check_files(lab, {"add_rate/ledger.csv": [f"{BOX}/add_rate"]}), [])
+        self.assertEqual(check_files(lab), [])
         (lab / "add_rate" / "broken.json").write_text("{")
         (lab / "add_rate" / "quote.csv").write_text('a,"b\n')
-        self.assertEqual(sorted(p.split(":")[0] for p in check_files(lab, {"add_rate/ledger.csv": [f"{BOX}/add_rate"]})),
-                         ["add_rate/broken.json", "add_rate/quote.csv"])
+        self.assertEqual(sorted(p.split(":")[0] for p in check_files(lab)), ["add_rate/broken.json", "add_rate/quote.csv"])
 
     def test_portable_makes_checkout_paths_relative_and_other_home_paths_tilde(self) -> None:
         home, root, other = Path.home(), self.root / "bench", self.root / "fsla"

@@ -19,11 +19,13 @@ FORMAT = 1
 
 _SEGMENT = re.compile(r"^[A-Za-z0-9_.-]+$")
 _RECORD = re.compile(r"^[0-9a-f]{24}\.json$")
-#: A MACHINE PATH: any absolute path. A record is read on other machines and published, so it names a file by its path
-#: inside its checkout and a checkout by `checkout()`, never by where either sat on the machine that ran it -- a home
-#: directory, a container's work tree or a rented box's are all refused alike. A path starts a word: after a letter, a
-#: digit, `.`, `~`, `:` or another `/` it is a ratio, a relative path or a URL, not a path on a machine.
-_MACHINE_PATH = re.compile(r"(?<![\w.~/:\\%-])/[A-Za-z0-9_.+@-]+(?:/[A-Za-z0-9_.+@-]*)*")
+#: A MACHINE PATH: a path inside someone's home directory -- `/home/<user>`, `/Users/<user>`, `/root` (a container's or a
+#: rented box's, where the checkouts sit) or a Windows user folder. A record is read on other machines and published, so it
+#: names a file by its path inside its checkout and a checkout by `checkout()` (`portable()` rewrites a message so); a
+#: system path (`/opt/venv/bin/python`, `/usr/local/cuda`) is a fact of the environment and is kept. A path starts a word:
+#: after a letter, a digit, `.`, `~`, `:` or another `/` it is a ratio, a relative path or a URL.
+_MACHINE_PATH = re.compile(r"(?<![\w.~/:\\%-])(?:/(?:home|Users)/[A-Za-z0-9_.+@-]+|/root|/mnt/[a-z]/Users/[A-Za-z0-9_.+@ -]+|"
+                           r"[A-Za-z]:[\\/]Users[\\/][A-Za-z0-9_.+@ -]+)(?:[/\\][A-Za-z0-9_.+@-]*)*")
 #: THE LOCATIONS OF A TIMING: a timing is comparable only to the code it ran, so a sample stored here names a commit
 TIMING = "timing"
 
@@ -238,17 +240,12 @@ def outputs(prefix: str, root: Path | str | None = None) -> Iterator[tuple[dict,
                     yield record, sample, json.loads(path.read_text()) if path.suffix == ".json" else path
 
 
-def _unadmitted(where: str, blob: object, admitted: dict[str, list[str]]) -> list[str]:
-    """The machine paths in `blob` that `admitted` does not list for the file `where`."""
-    return sorted(set(machine_paths(blob)) - set(admitted.get(where, ())))
-
-
-def check(root: Path | str | None = None, admitted: dict[str, list[str]] | None = None) -> list[str]:
+def check(root: Path | str | None = None) -> list[str]:
     """What is wrong with the stored records: a key that does not recompute, a location that is not the record's
-    directory, samples out of order, a successful sample whose output is missing, a failed one with no error, a machine
-    path in a record or an output. `admitted` maps a file (its path under `root`) to the machine paths it is known to
-    carry: records stored before the store refused every absolute path, never rewritten, hold exactly those."""
-    root, admitted = backend(root), admitted or {}
+    directory, samples out of order, a successful sample whose output is missing, a failed one with no error. The machine
+    path is refused where a sample is written (`put`), not here: a stored record is never rewritten, so its consistency
+    is what is checked."""
+    root = backend(root)
     problems = []
     for loc in locations(root):
         for path in sorted((root / loc).glob("*.json")):
@@ -266,29 +263,21 @@ def check(root: Path | str | None = None, admitted: dict[str, list[str]] | None 
                 problems.append(f"{where}: location {record.get('location')!r} is not its directory")
             if record.get("format") != FORMAT:
                 problems.append(f"{where}: format {record.get('format')!r} is not {FORMAT}")
-            found = _unadmitted(where, record, admitted)
-            if found:
-                problems.append(f"{where}: carries machine paths {found}")
             for i, sample in enumerate(record.get("samples", [])):
                 if sample.get("n") != i:
                     problems.append(f"{where}: sample {i} is numbered {sample.get('n')}")
                 out = root / loc / str(sample.get("output"))
                 if sample.get("ok") and not out.is_file():
                     problems.append(f"{where}: sample {i}'s output {sample.get('output')} is missing")
-                elif sample.get("ok"):
-                    found = _unadmitted(f"{loc}/{out.name}", _content(out), admitted)
-                    if found:
-                        problems.append(f"{where}: sample {i}'s output carries machine paths {found}")
                 if not sample.get("ok") and not sample.get("error"):
                     problems.append(f"{where}: failed sample {i} carries no error")
     return problems
 
 
-def check_files(directory: Path | str, admitted: dict[str, list[str]] | None = None) -> list[str]:
+def check_files(directory: Path | str) -> list[str]:
     """What is wrong with a directory of files kept as written (the lab's records, `lab/`): a JSON file that does not
-    parse, a CSV file that does not, a file that is not text, a machine path in any of them that `admitted` (a file's
-    path under `directory` -> the paths it is known to carry) does not list."""
-    directory, admitted = Path(directory), admitted or {}
+    parse, a CSV file that does not, a file that is not text."""
+    directory = Path(directory)
     problems = []
     for path in sorted(p for p in directory.rglob("*") if p.is_file()):
         where = str(path.relative_to(directory))
@@ -297,10 +286,9 @@ def check_files(directory: Path | str, admitted: dict[str, list[str]] | None = N
         except UnicodeDecodeError:
             problems.append(f"{where}: not text")
             continue
-        blob: object = text
         if path.suffix == ".json":
             try:
-                blob = json.loads(text)
+                json.loads(text)
             except json.JSONDecodeError as ex:
                 problems.append(f"{where}: not JSON ({ex})")
                 continue
@@ -313,7 +301,4 @@ def check_files(directory: Path | str, admitted: dict[str, list[str]] | None = N
             except csv.Error as ex:
                 problems.append(f"{where}: not CSV ({ex})")
                 continue
-        found = _unadmitted(where, blob, admitted)
-        if found:
-            problems.append(f"{where}: carries machine paths {found}")
     return problems

@@ -141,15 +141,16 @@ record = store.get(key(semantics))                  # Store.complete(record), st
     records/<location>/<key>.<n>.out.<ext>   sample n's output
 
 Nothing derived from two records (a ratio, a baseline) is stored: that is the reader's. **A record carries no machine
-path**: any absolute path in anything stored is refused at `put` -- a home directory's, a container's or a rented box's
-alike -- since a record is read on other machines and published; a file is named by its path inside its checkout
+path**: a path inside a home directory in anything stored is refused at `put` -- a person's, a container's or a rented
+box's alike -- since a record is read on other machines and published; a file is named by its path inside its checkout
 (`portable(text, *checkouts)` rewrites a message) and a checkout by `checkout()`, its directory's name, branch, HEAD and
 the digest of its uncommitted diff. A git call that fails is a failure, never "clean, no commit". **A timing names its
 commits**: a sample at a `timing/...` location whose provenance's `checkouts` does not give every checkout's `git_sha` is
-refused. `check(root, admitted)` recomputes every key, holds every location to its directory and every successful sample
-to its output, and finds a machine path anywhere, but for the exact paths `admitted` lists for a file stored before the
-store refused them (records are never rewritten); `check_files(directory, admitted)` holds a directory of files kept as
-written (the data repository's `lab/`) to parsing and to the same rule.
+refused. A MACHINE PATH is a path inside someone's home directory (`/home/<user>`, `/Users/<user>`, `/root`, a Windows user
+folder); a system path (`/opt/venv/bin/python`) is a fact of the environment and is kept. The rule is the writer's, refused
+where a sample is written: `check(root)` recomputes every key, holds every location to its directory and every successful
+sample to its output, and reads no record's content, since a stored record is never rewritten; `check_files(directory)`
+holds a directory of files kept as written (the data repository's `lab/`) to parsing.
 
 **The index** (`fsla_devtools.results.index`) is the records as one SQLite database, derived: `records(location, key,
 format, semantics)` and `samples(location, key, n, ok, utc, wall_s, provenance, error, output_path, output, extra)`, the
@@ -170,8 +171,8 @@ repository's own index is a build output (`results_index`, `bazel/results.bzl`),
 | `cells` | fleet and local grids | stored grid cell: bench, config, cell, image or local checkouts, row |
 
 ```bash
-python -m fsla_devtools.results [--root RECORDS] check [--admitted FILE]   # the default root: store.root's records/
-python -m fsla_devtools.results check-files DIR [--admitted FILE]
+python -m fsla_devtools.results [--root RECORDS] check   # the default root: store.root's records/
+python -m fsla_devtools.results check-files DIR
 python -m fsla_devtools.results show [LOCATION]
 python -m fsla_devtools.results index [--db FILE]
 python -m fsla_devtools.results sql "SELECT ..."
