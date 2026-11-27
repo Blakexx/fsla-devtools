@@ -264,6 +264,36 @@ class VerdictQuery(unittest.TestCase):
         _, rows = index.query("SELECT cell, trusted, ratio_median, error FROM null_gates ORDER BY cell", root=self.root)
         self.assertEqual(rows, [("dense", 1, 1.0, None), ("sparse", None, None, "a copy could not run")])
 
+    def test_a_label_owners_label_is_its_repository_and_its_arm_the_targets_name(self):
+        plant(self.root, tip_ms=1.0, tip_owner="@candidate//:carry_forward")
+        _, rows = index.query("SELECT label, arm, git_sha FROM timing_members WHERE member = 'm0'", root=self.root)
+        self.assertEqual(rows, [("@candidate", "carry_forward", "a")])
+        (got,) = verdicts(self.root, reference="master")
+        self.assertEqual((got["candidate"], got["arm"], got["null_gate"]), ("@candidate", "carry_forward", "none"))
+
+    def gate(self, trusted, owner="@candidate//:carry_forward", sha="a"):
+        rows = [{"owner": owner, "cell": "dense", "trusted": trusted, "ratio_median": 1.0 if trusted else 0.5}]
+        run = f"20260915T{next(RUNS):06d}Z-r"
+        Store("@bench//measure:null_G", self.root).put({"session": "null", "trusted": trusted, "owner": owner},
+                                                       output={"members": [], "samples": [], "null": rows},
+                                                       provenance={"run": run, "checkouts": {owner: {"git_sha": sha}}},
+                                                       run=run)
+
+    def test_a_unit_whose_null_gate_found_a_workers_bias_is_not_judged(self):
+        """The bench's null gate is on the arms it compares, and the verdict reads it (audit C6)."""
+        plant(self.root, tip_ms=1.6, tip_owner="@candidate//:carry_forward")
+        plant(self.root, tip_ms=1.6, tip_owner="@candidate//:carry_forward")
+        self.gate(False)
+        (got,) = verdicts(self.root, reference="master")
+        self.assertEqual((got["verdict"], got["null_gate"]), ("untrusted", "untrusted"))
+        self.assertIn("a worker's bias", got["reason"])
+        self.gate(True, owner="master//:carry_forward", sha="base")
+        self.gate(True)  #: the newest gate on the commit is the one read
+        (got,) = verdicts(self.root, reference="master")
+        self.assertEqual(got["verdict"], "regression")
+        _, rows = index.query("SELECT label, arm, cell, trusted, git_sha FROM null_gates ORDER BY utc", root=self.root)
+        self.assertEqual(rows[0], ("@candidate", "carry_forward", "dense", 0, "a"))
+
     def test_an_instruments_cells_are_rows_with_their_status(self):
         summary = {"cells": {"dense": {"status": "ok", "exit": 0}, "deep": {"status": "failed", "exit": 1, "error": "no arm"}}}
         Store("@fsla//measure:phases", self.root).put({"executor": "run_tool"}, output={"dense": {}},

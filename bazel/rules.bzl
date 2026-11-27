@@ -227,7 +227,7 @@ tool_run = rule(
     executable = True,
     attrs = {
         "tool": attr.string(doc = "the tool's script, from the checkout's root (`tools/lab.py`)"),
-        "module": attr.string(doc = "or the module it runs (`fsla_devtools.build`)"),
+        "module": attr.string(doc = "or the module it runs (`fsla_devtools.results`)"),
         "environment": attr.bool(doc = "run on the environment's interpreter, for a tool that imports nothing of the " +
                                        "checkout's siblings (CI has no venv)"),
         "venv": attr.string(mandatory = True, doc = "the environment's store venv"),

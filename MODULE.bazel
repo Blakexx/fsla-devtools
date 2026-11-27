@@ -26,4 +26,6 @@ environment.python(
     uv_pin = "//pins:uv_pin.json",
 )
 environment.tree(name = "devtools_tree")
-use_repo(environment, "devtools_env", "devtools_tree", "uv")
+#: the central cells, which the measurement rules' own targets run on (tests/rules/)
+environment.cells(name = "devtools_cells")
+use_repo(environment, "devtools_cells", "devtools_env", "devtools_tree", "uv")

@@ -1,5 +1,5 @@
 """THE ENTRY WORKER: an entry's timed callables, set up, called, reset and dropped for a session
-(`fsla_devtools.timing.session`) or the timing server.
+(`fsla_devtools.timing.session`), and each alone for its memory pass.
 
     python -m fsla_devtools.timing.entry_worker
 
@@ -27,8 +27,15 @@ import os
 import sys
 import traceback
 
-from ..build.worker import load
 from ..cells import draw_digest
+
+
+def load(ref: str):
+    """An executor by its `module:function`."""
+    module, _, name = ref.partition(":")
+    if not module or not name:
+        raise ValueError(f"expected module:function, got {ref!r}")
+    return getattr(importlib.import_module(module), name)
 
 
 def _loaded(binds) -> dict[str, str]:

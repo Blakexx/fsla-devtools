@@ -34,7 +34,7 @@ can group them.
 
     {"schema": 1, "data": "fsla_devtools.cells.form:cell", "cells": [{"kind": "qkv", "seed": 0, "tokens": 1024}, ...]}
 
-Which cells launch together, and what they hold equal, is a declaration's (a root's cell lists), never the registry's.
+Which cells launch together, and what they hold equal, is a workspace's targets' (a bench's groups), never the registry's.
 
 Standard library only: a registry loads and checks without torch; realizing a cell imports torch where it is called.
 """
@@ -174,6 +174,14 @@ def draw_digest() -> str:
     for path in sorted(p for p in FILES[0].parent.iterdir() if p.suffix in (".py", ".json")):
         h.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
     return h.hexdigest()
+
+
+def facts() -> dict[str, dict]:
+    """Every central cell's FIELDS in the one form (`fsla_devtools.cells.form.Cell`), by name: what a Bazel macro selects
+    cells by (the environment extension's `cells` tag writes them as `cells.bzl`), a fact of the cell, never its name."""
+    import dataclasses
+
+    return {name: dataclasses.asdict(build(record)) for name, record in sorted(central().cells.items())}
 
 
 def descriptions() -> dict[str, dict]:

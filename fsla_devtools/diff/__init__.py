@@ -1,24 +1,19 @@
-"""THE DIFF CLIENT: two executors, the same cells, one comparison rule, and a verdict the build can fail on.
+"""THE DIFF: two sides over the same cells, one comparison rule, and a claim a gate can fail on.
 
-A third client of the build system beside timing and the store, and the same shape: declaration helpers
-(`declare.py`), executors that run in the environments the declaration names (`executors.py`), and the comparison
-rules themselves (`strategies.py`).
+`bazel/measure.bzl`'s `diff_side` is a side: an executor (`module:function`, taking a cell's description and returning
+`{name: tensor}`) over cells in a bundle; another commit's side is the same description over a bundle the `bundle` tag
+built (`exported_entry`). `diff_verdict` compares two sides under one named rule (`strategies.py`: `bit-identical`,
+`per-slot`, `support-equal`): its tool, `verdict.py`, produces each side on its own bundle's interpreter (`side.py`) and
+compares them; `diff_test` is its gate, and `results_store` records it.
 
-    left  = side(g, "left",  env=tip,      executor="tests.oracle.subjects:carry_kernel", cells=cell_nodes)
-    right = side(g, "right", env=baseline, executor="tests.oracle.subjects:carry_kernel", cells=cell_nodes)
-    gate  = diff(g, "carry-vs-baseline", left=left, right=right, strategy="bit-identical")
+    diff_side(name = "side_oracle", bundle = ":side_bundle", executor = "tests.oracle.sides:oracle", cells = [...])
+    diff_verdict(name = "diff_oracle", left = "@candidate//:side_oracle", right = "@reference//:side_oracle",
+                 strategy = "bit-identical", minimum = N)
+    diff_test(name = "diff_oracle_test", verdict = ":diff_oracle")
 
-WHAT IT IS FOR. "The same function in two checkouts" and "the kernel against its fp64 reference" are the same
-question asked twice: run both, compare per cell under a stated rule, and say whether the difference is the one that
-was expected. A side is an ordinary target, so "against `HEAD~1`" is a second checkout the root already composes; the
-cells are cell nodes, so both sides are drawn from one record by one draw digest.
-
-THE RAW NEVER LEAVES THE WORKSPACE. Each side writes its tensors into its own node's workspace, which is the build
-cache -- wipeable, and swept. What the diff node outputs, and what a store target beside it files, is the DIFF: per
-cell and quantity the worst slot and where it is, what bound it, how many slots were compared and how many failed.
+WHAT IT IS FOR. "The same function in two commits" and "the kernel against its fp64 reference" are the same question
+asked twice: run both, compare per cell under a stated rule, and say whether the difference is the one that was
+expected. THE RAW NEVER LEAVES THE RUN: each side's tensors go to the verdict's scratch, and what the verdict outputs,
+and a store target files, is the DIFF -- per cell and quantity the worst slot and where it is, what bound it, how many
+slots were compared and how many failed.
 """
-from __future__ import annotations
-
-from .declare import diff, side
-
-__all__ = ["diff", "side"]

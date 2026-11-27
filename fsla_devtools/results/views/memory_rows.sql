@@ -4,7 +4,12 @@
 -- whose value after the calls is its peak). `peak_bytes` and `peak_reserved_total_bytes` add them in: the entry's whole
 -- peak. `owner`, `label` and `arm` read as in `timing_members`; a row that could not run has `status` failed.
 CREATE VIEW memory_rows AS
-SELECT target, key, utc, run, owner, rtrim(prefix, '/') AS label, substr(owner, length(prefix) + 1) AS arm, cell,
+SELECT target, key, utc, run, owner,
+       CASE WHEN instr(owner, '//') > 0 THEN rtrim(substr(owner, 1, instr(owner, ':') - 1), '/')
+            ELSE rtrim(prefix, '/') END AS label,
+       CASE WHEN instr(owner, '//') > 0 THEN substr(owner, instr(owner, ':') + 1)
+            ELSE substr(owner, length(prefix) + 1) END AS arm,
+       cell,
        status, error, calls, peak_allocated_bytes, peak_reserved_bytes, allocated_after_bytes,
        allocated_before_build_bytes, outside_allocator_bytes,
        peak_allocated_bytes + outside_allocator_bytes AS peak_bytes,

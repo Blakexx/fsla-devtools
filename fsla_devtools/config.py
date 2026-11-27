@@ -49,8 +49,8 @@ MACHINE: dict[str, dict[str, Key]] = {
                     "lower their own CPU and IO priority; a measurement never does"),
         "locks_trace": Key("bool", False, "print every lock acquire and release to stderr"),
         "scratch": Key("path", "/tmp/fsla", "the tools' scratch root; never read back as a record"),
-        "build_cache": Key("path", "~/.cache/fsla/build", "the build system's cache of completed targets and run "
-                           "workspaces (fsla_devtools.build); wipeable"),
+        "build_cache": Key("path", "~/.cache/fsla/build", "the build graph's caches: Bazel's disk and repository caches "
+                           "and the environment store (`bazel/`), the results index (`results/`); wipeable"),
         "store_max_gb": Key("int", 20, "the environment store's size bound in GiB (uv's wheel cache and the venvs built "
                             "from it, beside the build cache's `bazel/disk`, which fsla's rc bounds): each environment build "
                             "sweeps the wheels and environments no live environment holds, oldest first, "

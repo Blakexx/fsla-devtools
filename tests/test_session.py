@@ -9,6 +9,9 @@ description, and the bundle the entries import from -- and the program run on it
   description, is that member's failure.
 - The order's seed is the run's, stored; two runs walk different orders.
 - The session holds the GPU and the host budget whole, and its workers run at its own priority.
+- A null gate times each member against a copy of itself in a second worker and finds a worker's bias; a copy that
+  could not run is no finding, named. The memory pass takes each member alone, a member that cannot set up its row's
+  failure.
 - Run as the launcher runs it, it stores ONE sample whose semantics name what ran and whose provenance names each
   bundle's commit, and deletes its scratch; `--no-store` keeps the file and stores nothing.
 `python -m unittest tests.test_session`"""
@@ -153,6 +156,39 @@ class Session(unittest.TestCase):
         with self.assertRaisesRegex(session.Refused, "one stopwatch"):
             self.measure(self.manifest([self.entry("fast", "fixed", params={"ms": 0.5}),
                                         self.entry("other", "other_clock", cells=("t16",))]))
+
+    def test_a_null_gate_times_each_member_against_its_copy_in_a_second_worker_and_finds_a_biased_one(self):
+        os.environ["FAKE_BIAS_DIR"] = str(self.tmp)
+        self.addCleanup(os.environ.pop, "FAKE_BIAS_DIR", None)
+        fair = self.entry("fair", "fixed", params={"ms": 0.125})
+        biased = self.entry("biased", "biased")
+        doc, semantics, _provenance = self.measure({**self.manifest([fair, biased]), "mode": "null"})
+        rows = {r["owner"]: r for r in doc["null"]}
+        self.assertEqual((rows["//measure:fair"]["trusted"], rows["//measure:fair"]["ratio_median"]), (True, 1.0))
+        self.assertEqual((rows["//measure:biased"]["trusted"], rows["//measure:biased"]["ratio_median"]), (False, 0.5))
+        #: each copy in a worker of its own
+        pids = {m["owner"]: m["built"]["pid"] for m in doc["members"] if "pid" in m["built"]}
+        self.assertNotEqual(pids["//measure:biased#a"], pids["//measure:biased#b"])
+        self.assertTrue(semantics["null_gate"])
+
+    def test_a_null_gate_whose_copy_could_not_run_has_no_finding_and_says_why(self):
+        doc, _semantics, _provenance = self.measure({**self.manifest([self.entry("fast", "fixed", params={"ms": 1.0}),
+                                                                      self.entry("unbuilt", "unbuilt")]),
+                                                     "mode": "null"})
+        row = {r["owner"]: r for r in doc["null"]}["//measure:unbuilt"]
+        self.assertIsNone(row["trusted"])
+        self.assertIn("no kernel", row["error"])
+
+    def test_the_memory_pass_takes_each_member_alone_and_records_one_that_cannot_set_up(self):
+        manifest = {"session": "//measure:memory", "mode": "memory", "calls": 5, "label": "@ws//measure:memory",
+                    "entries": [self.entry("fast", "fixed", params={"ms": 1.0}), self.entry("unbuilt", "unbuilt")]}
+        out, semantics, provenance = self.measure(manifest)
+        self.assertEqual([(r["owner"], r["status"]) for r in out["rows"]],
+                         [("//measure:fast", "ok"), ("//measure:unbuilt", "failed")])
+        self.assertEqual((out["rows"][0]["calls"], semantics["calls"], semantics["mode"]), (5, 5, "memory"))
+        self.assertEqual(provenance["checkouts"]["//measure:fast"], STAMP)
+        with self.assertRaisesRegex(session.Refused, "no member"):
+            self.measure({**manifest, "entries": [manifest["entries"][1]]})
 
     def run_program(self, *args: str) -> subprocess.CompletedProcess:
         path = "_main/measure/session.session.json"

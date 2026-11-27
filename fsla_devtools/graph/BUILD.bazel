@@ -1,7 +1,12 @@
-"""The environment's store builder, which the environment extension runs (bazel/environment.bzl)."""
+"""The environment's store builder, which the environment extension runs (bazel/environment.bzl), and the bundle tag's
+export of another workspace's entries (export.py, export.cquery)."""
 
 load("//bazel:workspace.bzl", "tree_part")
 
-exports_files(["make_env.py"])
+exports_files([
+    "export.cquery",
+    "export.py",
+    "make_env.py",
+])
 
 tree_part()

@@ -8,18 +8,16 @@ carry it. It is a development dependency: nothing a user installs imports it.
 | `fsla_devtools.mirror` | the declarations (`.github/declarations.json`), their check and the private-shaped content the tripwire refuses, run by each repository's commit gate |
 | `fsla_devtools.tripwire` | the content checks over a staged diff or a pushed range, run by each repository's pre-commit and pre-push hooks |
 | `fsla_devtools.docrefs` | the doc references: every citation a repository's docs make of its tree pinned to the content it was read against, run by each repository's `docrefs_test` |
-| `fsla_devtools.cells` | the central cell registry: every input an FSLA measurement or test runs on (carry, layer, producer, QKV), its draw, its seed and the regime it proves, named once; bases and the cells derived from them; each cell's DESCRIPTION (its record and the digest of the code that draws it), a Bazel target (`@<cells>//:<cell>`) or a build NODE's output |
-| `fsla_devtools.build` | the declared build system: targets declared by composable functions in files, keyed by what they read, cached or run in dependency order, holding the machine's resources, each in its own environment's worker |
-| `fsla_devtools.timing` | the timing system: the session program a Bazel run target starts (`fsla_devtools.timing.session`: interleaved, clock-locked, stored) and its entry workers; and, as targets of the declared build system, a server of entry workers, registrations of timed callables on cells, sessions, memory passes, null gates |
-| `fsla_devtools.diff` | the diff targets: two executors run over the same cells in the environments they name, compared under one rule (bit-identity, the per-slot clause rule, support equality), with a claim the build can fail on -- a difference expected or refused |
+| `fsla_devtools.cells` | the central cell registry: every input an FSLA measurement or test runs on (carry, layer, producer, QKV), its draw, its seed and the regime it proves, named once; bases and the cells derived from them; each cell's DESCRIPTION (its record and the digest of the code that draws it), a Bazel target (`@<cells>//:<cell>`), and its fields (`@<cells>//:cells.bzl`) |
+| `fsla_devtools.timing` | the timing system: the session program a Bazel run target starts (`fsla_devtools.timing.session`: interleaved, clock-locked, stored), over entries of one or several commits' bundles; its null gate and the memory pass; the entry workers |
+| `fsla_devtools.diff` | the diff: two sides over the same cells, each produced in its own bundle (`side`), compared under one rule (bit-identity, the per-slot clause rule, support equality) by a verdict (`verdict`), with a claim a gate can fail on -- a difference expected or refused |
 | `fsla_devtools.results` | the results store's code: one file a sample under its producing target's label, every sample kept, in the data repository (fsla-results); its index and views, the verdict (whether a candidate's timing is a regression against a reference timed in the same sessions), the instruments' deltas and the dashboard |
 | `fsla_devtools.instrument` | an instrument run: a tool over the files it reads, laid out as a tree of copies, its JSON (or its refusal) the output; what the `instrument` rule's action runs, and a store target's run for an instrument on the device |
 | `fsla_devtools.record` | the record of a build output: the program a `results_store` run target starts, storing each output file unless its record already holds it |
-| `fsla_devtools.store` | the store target of the declared build system: a result written through `fsla_devtools.results` as a run-stamped sample of its source's record |
 | `fsla_devtools.process` | `subprocess.run` for a command that starts processes of its own: a timeout or an interrupt stops the whole tree |
 | `fsla_devtools.config` | the dev config reader: one directory of JSON files a section, every key declared; the machine's `host`, `clock` and `store` sections every repository shares |
 | `fsla_devtools.locks` | the machine's locks: the GPU lock (exclusive or shared), the host-compute budget and named file locks, the SM clock lock (the machine's, counted by its holders) |
-| `fsla_devtools.graph` | the build graph's shared machinery: the front door every repository's Bazel runs through, the environment's store builder, the test tiers' sharding plugin |
+| `fsla_devtools.graph` | the build graph's shared machinery: the front door every repository's Bazel runs through, the environment's store builder, the bundle tag's export of another workspace's entries, the test tiers' sharding plugin |
 | `fsla_devtools.disk` | the machine's disk, held by the front door: the cap on live worktrees and their removal with their output bases (`bazel --worktree`), the free-space floor under every build, the trim of the repository cache's unused downloads |
 
 The `fsla_devtools` Bazel module (`MODULE.bazel`, `bazel/`) is the rest of the build graph's machinery: its
@@ -93,50 +91,22 @@ A repository turns it on with a `docrefs_test` (`bazel/rules.bzl`), whose attrib
 The test runs in the checkout, outside the sandbox and never cached: its input is the tracked tree and its history.
 This repository's own (`//:docrefs`, in the gate) pins this README's citations in `references.lock.json`.
 
-## The declared build system
-
-A DECLARATION FILE is plain Python, loaded by path, whose functions declare TARGETS on a graph. A target is an executor
-(`module:function`) that runs in an environment (`Env`: a python, a directory, variables; none is the build system's
-own), the targets it reads by role, the central cells it takes, its parameters, the resources it holds while it runs,
-whether it caches, whether it runs after a failure (`always_run`), a function that confirms a cached result still holds
-on this machine (`verify`), and the code its result depends on. A group is a target with no executor. Labels are scoped
-(`g.scoped("tip")`), so one function declares one checkout's targets under any label, and a root composes declaration
-files from several checkouts:
-
-```python
-def root(g, target):
-    fsla = load(Path(target) / "declare.py")
-    tip = fsla["declare"](g.scoped("tip"), fsla["checkout"](target, python=..., label="tip"), timing=start_timing_server(g))
-    return {"all": g.group("all", [tip["binary"], *tip["diffs"].values()])}
-```
-
-A target's KEY is sha256 over its executor, parameters, declared code digest, and each dependency's key and output
-digest -- a DATA INPUT is a dependency too, so a cell node's record and the digest of the code that drew it reach the key
-that way; labels, paths and run ids never enter it. The
-scheduler takes the targets in dependency order: a cached target whose key the build cache holds (`host.build_cache`,
-wipeable) is skipped, the rest run with their resources held -- `{"gpu": "all"}`, `{"gpu": 1}`, `{"host_cpu": 8}`,
-`{"clock": 1}`, counting semaphores over the machine's own locks, so processes outside the build are excluded too. An
-exception is a BUILD failure: the build stops scheduling and only `always_run` targets still run. What a target records
-as failed inside its own output (a timing entry whose kernel is not built) is its domain's, and the build goes on.
-
-```bash
-python -m fsla_devtools.build plan declare.py:all
-python -m fsla_devtools.build run  declare.py:all --only 'fsla/phases' --skip '*/timeline'   # prune by label
-```
-
 ## <a id="timing"></a>The timing system
 
-**A SESSION IS A BAZEL RUN TARGET** (`bazel/measure.bzl`). A `timing_entry` is one executor (`module:function`, called
-with a cell's data and the entry's `params`, returning a `fsla_devtools.timing.Timed`: set up, call, reset, one
-stopwatch) on cells named as targets (`cell`, which the environment extension's `cells` tag declares one of for every
-central cell: its description, never its tensors), with its BUNDLE -- its runfiles (the code it imports, what that code
-reads, files `layout` puts where the code reads them) and `<name>.bundle.json`: the workspace's stamp (the commit,
-branch, checkout name and uncommitted diff digest its `--workspace_status_command` writes as `STABLE_GIT_COMMIT`,
-`STABLE_GIT_BRANCH`, `STABLE_GIT_DIFF_SHA256`, `STABLE_CHECKOUT`; a workspace that stamps none is refused), the digest of
-every file the bundle holds, and its environment. `kind = "clock"` is the in-kernel clock read that proves a session's
-lock. An `interleaved_timing` names entries, a clock reader, `rounds`, `reps`, `warmup`, its `workspace` (the session is
-stored at its own label) and a `claim`, and `bazel run` starts the SESSION PROGRAM (`python -m fsla_devtools.timing.session`, on the checkout's own
-venv) on its manifest:
+**A SESSION IS A BAZEL RUN TARGET** (`bazel/measure.bzl`). A `timing_bundle` is the code a tree's entries run in: its
+runfiles (the code they import, what that code reads, files `layout` puts where the code reads them), the modules a
+worker must load from inside it (`binds`), and `<name>.bundle.json`, digested once for every entry over it: the
+workspace's stamp (the commit, branch, checkout name and uncommitted diff digest its `--workspace_status_command` writes
+as `STABLE_GIT_COMMIT`, `STABLE_GIT_BRANCH`, `STABLE_GIT_DIFF_SHA256`, `STABLE_CHECKOUT`; a workspace that stamps none is
+refused), the digest of every file the bundle holds, and its environment. A `timing_entry` is one executor
+(`module:function`, called with a cell's data and the entry's `params`, returning a `fsla_devtools.timing.Timed`: set
+up, call, reset, one stopwatch) in a bundle, on cells named as targets (`cell`, which the environment extension's
+`cells` tag declares one of for every central cell: its description, never its tensors; the same tag writes
+`cells.bzl`, every cell's fields, so a macro selects cells by their facts). `kind = "clock"` is the in-kernel clock read
+that proves a session's lock. An `interleaved_timing` names entries, a clock reader, `rounds`, `reps`, `warmup`, its
+`workspace` (the session is stored at its own label, `@<workspace>//<package>:<name>`) and a `claim`, and `bazel run`
+starts the SESSION PROGRAM (`python -m fsla_devtools.timing.session`, on the environment's store venv, `venv`) on its
+manifest:
 
 ```bash
 bazel run //measure:session_entmax                     # measure, store one sample at @fsla//measure:session_entmax
@@ -158,18 +128,38 @@ session stores nothing and keeps its samples in the scratch directory, named. A 
 captured once and replayed) is another executor over the same bundle and cells, declared as its own target, so its label
 is never its eager twin's.
 
-**AS TARGETS OF THE DECLARED BUILD SYSTEM** (`fsla_devtools.timing.declare`, the same interleaving loop,
-`fsla_devtools.timing.session.interleave`): `start_timing_server` starts a pool of entry workers,
-one per checkout environment; `register_timing` is one target registering a checkout's timed callable on every cell it
-takes, as ENTRIES; `measure_timing` is a session over the entries of any registrations: every entry set up behind a
-barrier, warmed past a floor of 10 calls, then called one at a time in a fresh random order each rep, with the entry's
-untimed reset before every call, under the GPU and clock locks with the clock read through a registered reader before
-and after. The session keeps every sample in the order taken, with its round, rep and position; which entry is the
-reference is chosen when the samples are read. An entry that cannot set up is recorded as that member's failure; two
-stopwatches or a clock off the lock fail the build. `measure_memory` takes each entry alone, and `measure_null_gate`
-times one registration's entries against copies of themselves in second workers, finding a worker's bias.
-`fsla_devtools.store.store` writes a target's result through the store (`fsla_devtools.results`) as a run-stamped sample
-of the record its source's semantics key.
+THE NULL GATE is `interleaved_timing(null_gate = True)`: the same session with every member set up twice, each copy in
+a worker of its own (`<owner>#a`, `<owner>#b`), stored at its own label with one row an entry on a cell -- the per-rep
+ratios of the copies, a over b, and `trusted` where their interquartile range holds one. A comparison across workers
+is read beside it: the verdict (`fsla_devtools.results.verdict`) reports each unit's gate, and does not judge a unit
+whose gate found a worker's bias. THE MEMORY PASS is `measure_memory(entries, calls)`: each member alone under the GPU
+lock and the host budget, the caching allocator's peak over its calls (each after its reset), what stayed allocated
+and what it holds outside the allocator, stored at its own label.
+
+## <a id="bundles"></a>Bundles: another commit in the same session
+
+A timing compares only inside the session that interleaved it, so two commits are entries of ONE run. Each commit is
+built in ITS OWN workspace by its own pins, and the environment extension's `bundle` tag consumes what it built:
+
+```python
+environment.bundle(name = "reference", commit = SHA, remote = "https://github.com/Blakexx/fsla.git")
+environment.bundle(name = "candidate", worktree_env = "FSLA_CANDIDATE")    # --repo_env=FSLA_CANDIDATE=PATH
+```
+
+The repository rule (`fsla_devtools.graph.export`) checks a commit out once under the store (`$FSLA_GRAPH_STORE/
+checkouts/<sha>`: a shallow fetch of the commit) and builds it through its own front door WITHOUT the machine's
+fsla-devtools override (`FSLA_GRAPH_OWN_PINS`), so an old commit never builds against today's rules, and shuts its
+server down after; a local checkout (`worktree_env`: a module names no machine path, so the run names the checkout) is
+built in place with the override, again every invocation, incrementally. Either way `bazel cquery` reads each
+`_timing_entry` target of `packages` (default `//measure:all`: entries, clock readers and diff sides) and its runfiles
+(`export.cquery`), `bazel build` builds them, and every file is COPIED into the repository's `tree/` -- a link into
+another output base dangles once that base is cleaned. The repository holds one `exported_entry` a target, by the
+target's own name (`@reference//:clock`), carrying the same provider as `timing_entry` with its paths this workspace's,
+and `exports.bzl` (`ENTRIES`: each target's kind, executor, parameters and cells by name) for a workspace's macros. A
+record names the entry by the role the workspace gives its repository (`@reference//:...`) and by its bundle's digest
+and stamp, so two runs of one commit are samples of one record. A commit older than the `timing_entry` rule cannot be
+a bundle. The costs: a fetch is a whole Bazel build in the other workspace (its failure is the fetch's), and one
+library compile a commit a machine unless the disk cache holds it.
 
 ## <a id="instruments"></a>The instruments and the records of build outputs
 
@@ -203,31 +193,38 @@ bazel run //measure:store_oracle_tier -- --no-store        # run it, keep its JS
 bazel run //measure:store_static_manifest -- --store-root DIR
 ```
 
-## The diff
+## <a id="the-diff"></a>The diff
 
-"The same function in two checkouts" and "the kernel against its fp64 reference" are the same question asked twice, so
-`fsla_devtools.diff` asks it once. `side` is one side of a comparison: an executor run in the environment it names over
-every cell TARGET it takes, writing its tensors into its own node's workspace. `diff` takes two sides and one named
+"The same function in two commits" and "the kernel against its fp64 reference" are the same question asked twice, so
+`fsla_devtools.diff` asks it once. A `diff_side` (`bazel/measure.bzl`) is one side of a comparison: an executor
+(`module:function`, given a cell's description, returning `{name: tensor}`) over cells in a bundle, `device` for one on
+the device; another commit's side is an `exported_entry` of its bundle. `diff_verdict` takes two sides and one named
 STRATEGY -- `bit-identical` (a change that claims to have moved no number), `per-slot` (the oracle's clause rule: a slot
 of size `s` may be off by `max(r*s, a)` under each `(r, a)` clause of its output kind, and by `rtol * envelope` where
 the output is multilinear, the smallest term binding), `support-equal` (which slots survive is the claim, then their
 values) -- and states what it EXPECTS: `same` is a gate on an invariant, `different` is the non-vacuity half, where a
-mutant that goes unseen is the failure. `on_difference` picks what a broken claim is, the same two-way choice every
-other target makes: a build failure, or the target's own recorded outcome.
+mutant that goes unseen is the failure. The verdict is an INSTRUMENT whose tool is `fsla_devtools.diff.verdict`: it
+starts `fsla_devtools.diff.side` for each side on the side's bundle's interpreter, in the bundle, and compares what they
+produced. Over host sides it is an action, cached on both bundles and the comparing environment, its sides at
+`threads` torch threads; over a side on the device it runs in the run phase of its store target, or in its test,
+holding the GPU and the host budget. `diff_test` is its gate: a claim not held fails it, or, with
+`on_difference = "record"`, is printed and passes; `results_store` records the verdict.
 
-Two lessons from the tool this replaces are built into the node rather than left to arrangement. A side NAMES the
-library it is supposed to be running (`binds`) and proves it: an editable install resolves its package through the
-install's path entry -- the canonical checkout -- so a side run from another worktree can import the very tree it is
-being compared against and agree with it perfectly, having compared nothing (measured, not hypothetical). The side
-refuses when its library resolved outside its own directory, and the comparison refuses two sides that resolved the
-same file. And a diff states the COUNT it needs (`minimum`): a comparison that compared less than it declared is a
-refusal, not a pass, because a gate that cannot run says so instead of reporting a verdict over whatever survived.
+Two lessons from the tool this replaces are built in rather than left to arrangement. A side NAMES the library it is
+supposed to be running (`binds`, the bundle's) and proves it: a side that imported its library from outside its bundle
+would compare another tree, so the side fails; and two sides with one bundle and one executor compared one tree with
+itself, which is refused. A verdict states the COUNT it needs (`minimum`): a comparison that compared less than it
+declared does not hold its claim, because a gate that cannot run says so instead of reporting a verdict over whatever
+survived. The raw never leaves the run: each side's tensors go to the verdict's scratch, and what it outputs is the
+DIFF -- per cell and quantity the worst slot, where it is, what bound it, and how many slots were compared. A cell
+either side could not produce is not a comparison that passed: it is counted as unusable and the claim does not hold;
+a cell both sides refused is listed, not counted.
 
-The raw never leaves the workspace. A side's tensors live in the build cache, which is wipeable and swept; what the
-diff node outputs, and what a store target beside it would file, is the DIFF -- per cell and quantity the worst slot,
-where it is, what bound it, and how many slots were compared. A cell either side could not produce is not a comparison
-that passed: it is counted as unusable and the claim does not hold, because a gate that goes green on a cell neither
-side ran measured nothing.
+```python
+diff_verdict(name = "diff_oracle", left = "@candidate//:side_oracle", right = "@reference//:side_oracle",
+             strategy = "bit-identical", minimum = N, venv = VENV)
+diff_test(name = "diff_oracle_test", verdict = ":diff_oracle", venv = VENV)
+```
 
 ## The results store
 
@@ -298,13 +295,13 @@ repository's own index is a build output (`results_index`, `bazel/results.bzl`),
 
 | view | from | one row per |
 |---|---|---|
-| `timing_members` | every session's samples (an output with `members` and `samples`, at its session's label) | member of a stored session: the run, the session, its registration (`owner`), the label and arm read from it, the cell, the LEVEL it prices (`kernel`, `op`, `layer`), whether it ran and why not, device, torch, the owner's commit and diff, the session's rounds, reps and clock reads |
+| `timing_members` | every session's samples (an output with `members` and `samples`, at its session's label) | member of a stored session: the run, the session, its entry (`owner`, a label; a registration in an older sample), the label and arm read from it, the cell, the LEVEL it prices (`kernel`, `op`, `layer`), whether it ran and why not, device, torch, the owner's commit and diff, the session's rounds, reps and clock reads |
 | `timing_samples` | `timing_members` | timed call, in the order taken: its member's label, arm and cell, its round, rep and position in the rep's random order, and its milliseconds |
 | `memory_rows` | every memory pass (`measure_memory`, at its label) | timing entry alone on a central cell: peak allocated and reserved bytes, what was allocated before the build and after the calls, bytes held outside the caching allocator and the totals with them, label, arm, commit |
 | `instrument_cells` | every per-cell instrument's samples (a `summary.cells`, at its store target's label) | cell of an instrument run: the run, whether the tool ran on it, and its exit and error when it could not |
 | `instrument_metrics` | every build output's record (semantics with `inputs`) | every NUMBER a declared instrument recorded, one row each, in long form: the run, the cell (NULL for the whole-binary `sass`), a dotted `metric` (`sass.<cubin>.<function>.<count>`) and its value |
 | `diff_cells` | every diff's samples (an output with `cells`, at its target's label) | cell and quantity of a stored diff: the claim and whether it `held`, the cell's status (`ok`, `unusable`, `refused`) and why, and the quantity's verdict with why it differs and its worst slot |
-| `null_gates` | every null gate (`measure_null_gate`, at its label) | cell of a null gate: the run, whether the entry's two workers agree, the ratio's median and quartiles |
+| `null_gates` | every null gate (`interleaved_timing(null_gate = True)`, at its label) | entry on a cell of a null gate: the run, its owner, label and arm, whether its two workers agree, the ratio's median and quartiles, its commit |
 | `cells` | fleet and local grids | stored grid cell: bench, config, cell, image or local checkouts, row |
 
 ```bash
@@ -422,13 +419,15 @@ first trims the repository cache's unused downloads when a trim is due. `bazel -
 | `host_cc`, `host_gpu` | the host C++ compiler's and the machine's devices' identities, which actions that depend on them are keyed on |
 | `tree` | the checkout's tracked files (`git ls-files`; the commit's index under the commit gate) |
 | `data` | the data repository at one commit (`remote`, `commit`, the `sha256` of the commit's archive): its `records/`, as `:records`, each file by its path, and `:root` (its BUILD file, which names the root) (`bazel/data.BUILD`), nothing of its own graph -- what a workspace's citations and readers take, fixed content at the pin |
-| `cells` | every central cell's description as a target (`@<name>//:<cell>`, a `cell` of `bazel/measure.bzl`), generated from this module's registry on the machine's `python3` |
+| `cells` | every central cell's description as a target (`@<name>//:<cell>`, a `cell` of `bazel/measure.bzl`) and every cell's fields (`@<name>//:cells.bzl`'s `CELLS`), generated from this module's registry on the machine's `python3` |
+| `bundle` | another workspace's timing entries, clock readers and diff sides, built there by its own pins and copied in (`@<name>//:<target>`, `exported_entry`; `@<name>//:exports.bzl`'s `ENTRIES`): a commit (`commit`, `remote`) or a local checkout the run names (`worktree_env`), [above](#bundles) |
 | `docrefs` | the doc references' tool as `@<name>//:docrefs.py`, a copy of `fsla_devtools/docrefs.py` a workspace's `docrefs_test` runs ([below](#the-doc-references)) |
 
 `python`, `pinned`, `cuda_toolkit` and `data` are REPRODUCIBLE repositories (`repo_metadata(reproducible = True)`: their result
 is fixed by their pins and the files they read), so Bazel unpacks each once into the repo contents cache
 (`host.build_cache`'s `repository/contents`) and every checkout's output base links it; `host_cc`, `host_gpu` and `tree`
-read the machine or the workspace, `cells` and `docrefs` are made from this module's source, and each is made per checkout.
+read the machine or the workspace, `cells` and `docrefs` are made from this module's source, `bundle` is another
+workspace's build, and each is made per checkout.
 
 **The environment store is bounded.** `host.store_max_gb` and `host.store_max_age_days` (the dev config) bound the store
 the `python` tag builds into: each environment build sweeps, under the store's lock, the environments idle past the age
@@ -462,11 +461,14 @@ files names it in `repos` (a label of it -> a variable): its files join the runf
 variable (`{"@fsla_data//:records": "FSLA_DATA"}`, the pinned data). **The results store's rules** (`bazel/results.bzl`): the records'
 index as a build output (`results_index`), a data repository's.
 
-**The measurement rules** (`bazel/measure.bzl`): a cell's description (`cell`), a timing entry with its bundle
-(`timing_entry`) and an interleaved session over entries that `bazel run` measures and stores (`interleaved_timing`),
-[above](#timing); an instrument (`instrument`) and a build output's record that `bazel run` stores (`results_store`),
-[above](#instruments); and the workspace's stamp alone (`workspace_stamp`, `<name>.stamp.json`, refusing a workspace that
-stamps no commit), the provenance of what a program run by `bazel run` measures and stores itself (fsla's lab).
+**The measurement rules** (`bazel/measure.bzl`): a cell's description (`cell`), a bundle (`timing_bundle`), a timing
+entry in it (`timing_entry`), an interleaved session over entries or its null gate that `bazel run` measures and stores
+(`interleaved_timing`) and a memory pass (`measure_memory`), [above](#timing); another workspace's entry
+(`exported_entry`, the `bundle` tag's), [above](#bundles); a diff side, verdict and gate (`diff_side`, `diff_verdict`,
+`diff_test`), [above](#the-diff); an instrument (`instrument`) and a build output's record that `bazel run` stores
+(`results_store`), [above](#instruments); and the workspace's stamp alone (`workspace_stamp`, `<name>.stamp.json`,
+refusing a workspace that stamps no commit), the provenance of what a program run by `bazel run` measures and stores
+itself (fsla's lab).
 
 ## <a id="the-machines-disk"></a>The machine's disk
 
@@ -524,7 +526,9 @@ bazel test //:gate
 ```
 
 The gate is ruff, its blank-line family, the tests, the declaration check, the Bazel release check and the doc
-references, on the graph's own environment.
+references, on the graph's own environment. `bazel test //...` also builds the measurement rules' own targets
+(`tests/rules/`: a bundle of the stub sides and entries, two diff sides, a session, its null gate and a memory pass) and
+runs the verdict between the sides and its gate (`//tests/rules:planted_test`), which must see the planted difference.
 The commit gate (`.githooks/pre-commit` -> `bazel/bazel --commit-gate`, every FSLA repository's hook) runs `//:gate` on
 the commit as git will write it: the changes not staged set aside, the tree the commit's index.
 

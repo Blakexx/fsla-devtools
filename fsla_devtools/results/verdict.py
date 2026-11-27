@@ -21,6 +21,10 @@ and a regression needs all three:
 Anything short of all three is reported as what it is (`flagged_not_confirmed`, `suspicious`, `insufficient_data`,
 `cannot_resolve`, `no_regression`), never as a pass.
 
+THE NULL GATE (`timing/null`) is read beside every unit: the newest gate of each member's entry on its cell and commit.
+A unit whose gate found a worker's bias is `untrusted` and not judged -- its ratio compares two workers, not two codes;
+every other row says what the gate found (`trusted`, or `none`: never gated, or a copy could not run).
+
 THE QUERY. The reference is the reader's choice, never the run's. In every stored timing session (`timing_members`,
 `timing_samples`) that timed the reference label's arm on a cell, each other label's member of that arm on that cell is a
 candidate, and the pair is judged within the session. A UNIT is (arm, cell, candidate label, reference label), the
@@ -206,6 +210,18 @@ def classify(sessions: list[dict]) -> dict:
 _MEMBERS = """SELECT target, run, utc, member, label, arm, cell, level, git_sha, diff_sha256, device
               FROM timing_members WHERE status = 'ok' AND git_sha IS NOT NULL ORDER BY utc, target, run"""
 _SAMPLES = "SELECT target, run, member, round, ms FROM timing_samples"
+_GATES = """SELECT label, arm, cell, git_sha, trusted FROM null_gates WHERE owner IS NOT NULL AND git_sha IS NOT NULL
+            ORDER BY utc"""
+
+
+def null_gate(gates: dict, member: tuple, reference: tuple) -> str:
+    """What the newest null gate of each member's entry, on its cell and commit, found: `untrusted` where either found
+    a worker's bias, `trusted` where both found none, `none` where either was never gated (or its copies could not
+    run)."""
+    found = [gates.get(key) for key in (member, reference)]
+    if any(f == 0 for f in found):
+        return "untrusted"
+    return "trusted" if all(f == 1 for f in found) else "none"
 
 
 def verdicts(root: Path | str | None = None, *, reference: str, candidate: str | None = None, cell: str | None = None,
@@ -217,6 +233,8 @@ def verdicts(root: Path | str | None = None, *, reference: str, candidate: str |
     rounds: dict[tuple, dict[int, list[float]]] = {}
     for target, run, member, rnd, ms in index.query(_SAMPLES, root=root)[1]:
         rounds.setdefault((target, run, member), {}).setdefault(rnd, []).append(ms)
+
+    gates = {(label, arm_, cell_, sha): trusted for label, arm_, cell_, sha, trusted in index.query(_GATES, root=root)[1]}
 
     stored: dict[tuple, list[dict]] = {}
     for m in members:
@@ -245,8 +263,16 @@ def verdicts(root: Path | str | None = None, *, reference: str, candidate: str |
             units.setdefault(unit, []).append((m, session([c[r] for r in sorted(c)], [b[r] for r in sorted(b)])))
     out = list(refused.values())
     for unit, judged in units.items():
-        out.append({**_unit_row(unit, reference), "utc": judged[-1][0]["utc"],
-                    **classify([paired for _m, paired in judged])})
+        arm_, cell_, label, _level, _device, sha, _diff, base_sha, _base_diff = unit
+        gate = null_gate(gates, (label, arm_, cell_, sha), (reference, arm_, cell_, base_sha))
+        row = {**_unit_row(unit, reference), "utc": judged[-1][0]["utc"], "null_gate": gate}
+        #: A WORKER'S BIAS IS NOT A REGRESSION: a pair whose null gate found one compares two workers, not two codes
+        if gate == "untrusted":
+            row.update(verdict="untrusted", reason=f"the null gate found a worker's bias for {arm_} on {cell_}: a "
+                                                   "ratio across these workers carries it, and is not judged")
+        else:
+            row.update(classify([paired for _m, paired in judged]))
+        out.append(row)
     return sorted(out, key=lambda r: (r["utc"], r["arm"], r["cell"], r["candidate"]))
 
 
@@ -261,7 +287,7 @@ def table(rows: list[dict]) -> str:
     lines = [head]
     for r in rows:
         unit, candidate = f"{r['arm']}@{r['cell']}", f"{r['candidate']} {(r['git_sha'] or '')[:8]}"
-        if r["verdict"] == "refused":
+        if r["verdict"] in ("refused", "untrusted"):
             lines.append(f"{r['verdict']:<22}{unit:<56}{candidate:<20}  {r['reason']}")
             continue
         p = r["significance"].get("p")

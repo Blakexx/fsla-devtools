@@ -11,6 +11,15 @@ exports_files([
     "requirements.lock",
 ])
 
+#: the stub entries and sides the measurement rules' own targets bundle (tests/rules/)
+exports_files(
+    [
+        "tests/fake_entries.py",
+        "tests/fake_sides.py",
+    ],
+    visibility = ["//tests/rules:__pkg__"],
+)
+
 #: this package's part of the tree, and the whole tree: every package's tracked files
 tree_part()
 
@@ -21,6 +30,7 @@ filegroup(
         "//bazel:tracked",
         "//pins:tracked",
         "//fsla_devtools/graph:tracked",
+        "//tests/rules:tracked",
     ],
 )
 

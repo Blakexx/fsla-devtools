@@ -1,11 +1,8 @@
-"""THE TIMING SERVER'S POOL: one entry worker per checkout environment, started on first use, stopped by stop_timing_server.
+"""A SESSION'S POOL: one entry worker per bundle, started on first use, stopped when the session ends.
 
-An environment is a python, a directory and an import path; every registration made in it shares its worker, so a build
-holds one device context per checkout, whatever it registers. A null gate's second copy names an `instance`, the one
-thing that starts a second worker in one environment.
-
-It lives in the build system's own worker for the whole build (a module-level object the timing executors share), so
-workers and whatever the device holds between sessions are the pool's, and a session sets up and drops its own entries.
+A bundle's worker is an interpreter, a directory and an import path; every entry of the bundle shares it, so a session
+holds one device context per bundle, whatever it times. A null gate's second copy names an `instance`, the one thing
+that starts a second worker for one bundle.
 """
 from __future__ import annotations
 
@@ -78,14 +75,4 @@ class Pool:
         self.workers.clear()
 
 
-#: the server of this build system worker, set by start_timing_server
-SERVER: list[Pool] = []
-
-
-def server() -> Pool:
-    if not SERVER:
-        raise RuntimeError("no timing server in this build: declare start_timing_server and depend on it")
-    return SERVER[0]
-
-
-__all__ = ["EntryWorker", "Pool", "SERVER", "server"]
+__all__ = ["EntryWorker", "Pool"]

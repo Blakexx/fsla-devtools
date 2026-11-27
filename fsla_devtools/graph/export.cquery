@@ -1,0 +1,21 @@
+# THE BUNDLE TAG'S READING of a workspace's entries (fsla_devtools.graph.export runs `bazel cquery --output=starlark
+# --starlark:file=` this file): each `_timing_entry` target as one JSON line -- its label, its description's path and
+# every file of its runfiles by its path there and in the build (a laid-out file by the path it is laid out at).
+
+def _info(target):
+    for key, value in providers(target).items():
+        if key.endswith("%TimingEntryInfo"):
+            return value
+    return None
+
+def format(target):
+    info = _info(target)
+    if info == None:
+        return ""
+    runfiles = info.runfiles
+    return json.encode({
+        "label": str(target.label),
+        "description": info.description.path,
+        "files": [[f.short_path, f.path] for f in runfiles.files.to_list()],
+        "symlinks": [[s.path, s.target_file.path] for s in runfiles.symlinks.to_list()],
+    })

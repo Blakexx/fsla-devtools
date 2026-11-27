@@ -6,7 +6,8 @@ It hands Bazel the machine's settings from the dev config (the shared disk and r
 `host.build_cache`, the environment store's bound `host.store_max_gb` and `host.store_max_age_days`, as an rc file read
 after the workspace's), and, where the workspace depends on the `fsla_devtools` module, the machine's fsla-devtools
 checkout as that module's override (a second rc file, the workspace's own), so a change made there is the one the graph
-runs and nothing names a machine path. It runs every BUILD under the host budget (`fsla_devtools.locks.host`): a
+runs and nothing names a machine path -- except in a commit the `bundle` tag builds by its own pins (`OWN_PINS`).
+It runs every BUILD under the host budget (`fsla_devtools.locks.host`): a
 command's build phase holds the slots free when it starts, at least one, and runs one compile job a `host.nvcc_threads`
 of them; its test or run phase holds none, so a test or a measurement takes its own locks as it does outside the graph
 -- a GPU test under a held budget is the deadlock the host's lock order exists to prevent.
@@ -92,9 +93,15 @@ def depends_on_module(workspace: Path) -> bool:
     return re.search(rf'bazel_dep\(\s*name\s*=\s*"{MODULE}"', text) is not None
 
 
+#: set by the environment extension's `bundle` tag for a commit it builds: the workspace builds by ITS OWN pins, so no
+#: module is overridden with the machine's checkout (an old commit would build against today's rules)
+OWN_PINS = "FSLA_GRAPH_OWN_PINS"
+
+
 def workspace_rc(workspace: Path) -> Path | None:
-    """The workspace's own settings: this checkout as the override of its `fsla_devtools` pin, where it has one."""
-    if not depends_on_module(workspace):
+    """The workspace's own settings: this checkout as the override of its `fsla_devtools` pin, where it has one and the
+    build is not one by the workspace's own pins (`OWN_PINS`)."""
+    if not depends_on_module(workspace) or os.environ.get(OWN_PINS):
         return None
     key = hashlib.sha256(str(workspace.resolve()).encode()).hexdigest()[:16]
     return _write(_cache() / "workspaces" / f"{key}.bazelrc", (

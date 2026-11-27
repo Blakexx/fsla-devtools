@@ -1,0 +1,110 @@
+"""THE MEASUREMENT RULES ON THEIR OWN TARGETS (bazel/measure.bzl), so this workspace's gate builds each one: a bundle of
+the stub sides and entries (tests/fake_sides.py, tests/fake_entries.py), two diff sides over central cells, the verdict
+between them -- an action, its tool producing each side on the bundle's interpreter and comparing them -- and its gate,
+which must see the planted difference; a timing entry, a session, its null gate and a memory pass, built (their run
+needs the device and the machine's locks)."""
+
+load("@devtools_env//:flags.bzl", "VENV")
+load(
+    "//bazel:measure.bzl",
+    "diff_side",
+    "diff_test",
+    "diff_verdict",
+    "interleaved_timing",
+    "measure_memory",
+    "timing_bundle",
+    "timing_entry",
+)
+load("//bazel:workspace.bzl", "tree_part")
+
+CELLS = [
+    "@devtools_cells//:carry-anti-64x64-T1024-carried",
+    "@devtools_cells//:carry-onehot-16x16-T1024",
+]
+
+timing_bundle(
+    name = "bundle",
+    binds = ["tests.fake_sides"],
+    data = [
+        "//:tests/fake_entries.py",
+        "//:tests/fake_sides.py",
+    ],
+    python = "@devtools_env//:python",
+    venv = VENV,
+)
+
+diff_side(
+    name = "flat",
+    bundle = ":bundle",
+    cells = CELLS,
+    executor = "tests.fake_sides:flat",
+)
+
+diff_side(
+    name = "sparse",
+    bundle = ":bundle",
+    cells = CELLS,
+    executor = "tests.fake_sides:sparse",
+)
+
+#: two functions of one bundle: compared, and they differ, which the claim expects
+diff_verdict(
+    name = "planted",
+    expect = "different",
+    left = ":flat",
+    minimum = 2,
+    right = ":sparse",
+    strategy = "bit-identical",
+    threads = 1,
+    venv = VENV,
+)
+
+diff_test(
+    name = "planted_test",
+    size = "small",
+    venv = VENV,
+    verdict = ":planted",
+)
+
+timing_entry(
+    name = "fixed",
+    bundle = ":bundle",
+    cells = CELLS,
+    executor = "tests.fake_entries:fixed",
+    params = {"ms": 1.0},
+)
+
+timing_entry(
+    name = "clock",
+    bundle = ":bundle",
+    executor = "tests.fake_entries:clock",
+    kind = "clock",
+)
+
+interleaved_timing(
+    name = "session",
+    claim = "unlocked",
+    clock = ":clock",
+    entries = [":fixed"],
+    venv = VENV,
+    workspace = module_name(),
+)
+
+interleaved_timing(
+    name = "null",
+    claim = "unlocked",
+    clock = ":clock",
+    entries = [":fixed"],
+    null_gate = True,
+    venv = VENV,
+    workspace = module_name(),
+)
+
+measure_memory(
+    name = "memory",
+    entries = [":fixed"],
+    venv = VENV,
+    workspace = module_name(),
+)
+
+tree_part()
