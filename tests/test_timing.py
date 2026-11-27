@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -58,8 +59,17 @@ class Timing(unittest.TestCase):
         return [g.targets.get(f"cells/{name}") or g.node(f"cells/{name}", executor="fake_executors:record",
                                                          params={"cell": name}) for name in names]
 
-    def env(self, label):
-        return Env(label, sys.executable, str(HERE), {"PYTHONPATH": os.pathsep.join([str(HERE.parent), str(HERE)])})
+    def env(self, label, cwd: Path = HERE):
+        return Env(label, sys.executable, str(cwd), {"PYTHONPATH": os.pathsep.join([str(HERE.parent), str(HERE)])})
+
+    def committed(self, name: str) -> Path:
+        """A checkout of one commit for an environment to run in: what a stored sample's provenance names."""
+        repo = self.root / name
+        repo.mkdir()
+        git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run([*git, "init", "-q"], check=True)
+        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "c"], check=True)
+        return repo
 
     def go(self, roots):
         with Runtime(HERE) as runtime:
@@ -69,13 +79,13 @@ class Timing(unittest.TestCase):
     def session(self, result):
         return json.loads((Path(result.dir) / "session.json").read_text())
 
-    def graph(self, registrations, **measure):
+    def graph(self, registrations, cwd: Path = HERE, **measure):
         g = Graph()
         server = start_timing_server(g)
-        entries = [register_timing(g, name, server=server, env=self.env(env), executor=f"fake_entries:{ex}",
+        entries = [register_timing(g, name, server=server, env=self.env(env, cwd), executor=f"fake_entries:{ex}",
                                    cells=self.cells(g, cells), params=params)
                    for name, env, ex, cells, params in registrations]
-        clock = register_clock_reader(g, "clock", server=server, env=self.env("tip"), executor="fake_entries:clock")
+        clock = register_clock_reader(g, "clock", server=server, env=self.env("tip", cwd), executor="fake_entries:clock")
         session = measure_timing(g, "session", server=server, entries=entries, clock=clock, rounds=2, reps=3, **measure)
         stop = stop_timing_server(g, server=server, after=[session])
         return g, session, stop
@@ -178,30 +188,43 @@ class Timing(unittest.TestCase):
     def test_a_stored_result_of_a_cached_source_names_the_checkout_it_ran_in(self):
         """A cached source carries no `local` facts, so where it ran reaches the store as a SETTING taken from its
         environment at declaration -- and the sample's provenance names that checkout."""
-        from fsla_results import Store
-
+        from fsla_devtools.results import Store
         from fsla_devtools.store import store
 
         g = Graph()
-        src = g.node("inst", executor="fake_executors:echo", env=self.env("tip"))
+        src = g.node("inst", executor="fake_executors:echo", env=self.env("tip", self.committed("tip")))
         kept = store(g, "store", source=src, location="fsla/inst", root=str(self.root / "records"))
         self.go([kept])
         (record,) = Store("fsla/inst", self.root / "records").records()
         self.assertEqual(list(record["samples"][-1]["provenance"]["checkouts"]), ["tip"])
 
     def test_a_stored_session_appends_a_run_stamped_sample_to_its_configurations_record(self):
+        from fsla_devtools.results import Store
         from fsla_devtools.store import store
 
-        g, session, _stop = self.graph([("tip/fast", "tip", "fixed", ["t8"], {"ms": 1.0})])
+        g, session, _stop = self.graph([("tip/fast", "tip", "fixed", ["t8"], {"ms": 1.0})], cwd=self.committed("tip"))
         kept = store(g, "store", source=session, location="timing/session", root=str(self.root / "records"))
         stop = stop_timing_server(g, "stop-after-store", server=g.targets["timing-server"], after=[kept])
         first, second = self.go([stop]), self.go([stop])
-        from fsla_results import Store
-
         (record,) = Store("timing/session", self.root / "records").records()
         self.assertEqual([s["run"] for s in record["samples"]], [first["store"].output["run"], second["store"].output["run"]])
         self.assertIn("tip/fast", record["samples"][0]["provenance"]["checkouts"])
         self.assertEqual([m["status"] for m in record["samples"][0]["summary"]["members"]], ["ok"])
+
+    def test_a_stored_timing_names_a_commit_or_is_refused(self):
+        """A timing is comparable only to the code it ran: a session whose checkout has no commit is refused by the
+        store and nothing is written (audit B8)."""
+        from fsla_devtools.store import store
+
+        bare = self.root / "bare"
+        bare.mkdir()
+        subprocess.run(["git", "-C", str(bare), "init", "-q"], check=True)
+        g, session, _stop = self.graph([("tip/fast", "tip", "fixed", ["t8"], {"ms": 1.0})], cwd=bare)
+        kept = store(g, "store", source=session, location="timing/session", root=str(self.root / "records"))
+        stop = stop_timing_server(g, "stop-after-store", server=g.targets["timing-server"], after=[kept])
+        out = self.go([stop])
+        self.assertEqual(out["store"].status, "failed")
+        self.assertFalse((self.root / "records" / "timing" / "session").exists())
 
 
 if __name__ == "__main__":

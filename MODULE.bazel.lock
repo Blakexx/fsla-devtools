@@ -199,8 +199,8 @@
   "moduleExtensions": {
     "//bazel:environment.bzl%environment": {
       "general": {
-        "bzlTransitiveDigest": "fWnz4VEUK1f2i7SoVPWoX+jUPEjYcsA3snToJt8FN/M=",
-        "usagesDigest": "WBthK8RAqGnM0VX7aI4pH1zRVwXvt7QhHmO/OjOQ79k=",
+        "bzlTransitiveDigest": "7UNZMxxfRm8N9jHfEE0cOZXedwvcNELF1lSHT1OkSjo=",
+        "usagesDigest": "OQ3FRo4MuQMwN/2kdexX6XnTn8cuEMfIyEgBhZNNsE4=",
         "recordedInputs": [
           "REPO_MAPPING:,uv +environment+uv"
         ],
@@ -214,9 +214,7 @@
               "index": "https://download.pytorch.org/whl/cu130",
               "index_field": "torch_index",
               "devtools": true,
-              "packages": [
-                "fsla-results @ git+https://github.com/Blakexx/fsla-results@90085af6e2ca9c22d3724c0c719ba91b146cdd8c"
-              ],
+              "packages": [],
               "isolated_builds": true,
               "post_args": [],
               "post_env": [],

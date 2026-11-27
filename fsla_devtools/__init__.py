@@ -6,9 +6,10 @@
   proof, named once for every package -- with bases, derived cells, and the node a declaration takes a cell as.
 - `fsla_devtools.build`: the declared build system -- targets declared in files, keyed, cached, held and run.
 - `fsla_devtools.timing`: the timing system as targets -- interleaved clock-locked sessions, memory passes, null gates.
-- `fsla_devtools.store`: the store target, a result written through fsla-results.
-- `fsla_devtools.verdict`: whether a candidate's timing is a regression against a reference timed in the same sessions.
+- `fsla_devtools.results`: the results store's code -- records keyed by their semantics, every sample kept, in the data
+  repository -- and its readings: the index and views, the verdict, the instruments' deltas, the dashboard.
+- `fsla_devtools.store`: the store target, a result written through `fsla_devtools.results`.
 - `fsla_devtools.process`: a command stopped whole, profiler and measured process included.
-- `fsla_devtools.config`: the dev config reader, and the machine sections (`host`, `clock`) every repository shares.
+- `fsla_devtools.config`: the dev config reader, and the machine sections (`host`, `clock`, `store`) every repository shares.
 - `fsla_devtools.locks`: the GPU lock, the host-compute budget and file locks, the clock lock.
 """

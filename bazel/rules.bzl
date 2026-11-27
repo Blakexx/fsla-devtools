@@ -19,18 +19,29 @@ cd "$tree"
 #: no machine reaches a check over files: the dev config is the defaults
 unset FSLA_DEV_CONFIG
 export PATH={venv}/bin:/usr/bin:/bin RUFF_NO_CACHE=true
-{git}exec {cmd}
+{repos}{git}exec {cmd}
 """
 
 #: the copy as a git index of exactly its files: a check that asks git for the tracked files gets the check's inputs
 _TREE_GIT = "git init -q && git add -A\n"
 
+#: ANOTHER REPOSITORY A CHECK READS (the pinned data, a module's files): its files in the runfiles, and its root -- the
+#: runfiles' directory of that repository -- exported as the variable the check reads it by
+_REPOS_DOC = ("other repositories the check reads: each label's files, and the root of its repository exported as the " +
+              "variable it names (the pinned data: `FSLA_DATA`)")
+
+def _repos(ctx):
+    """The `repos` exports, and their files."""
+    lines = ['export %s="$TEST_SRCDIR/%s"\n' % (name, target.label.repo_name) for target, name in ctx.attr.repos.items()]
+    return "".join(lines), [target.files for target in ctx.attr.repos]
+
 def _tree_test_impl(ctx):
     script = ctx.actions.declare_file(ctx.label.name + ".sh")
-    body = _TREE_TEST.format(venv = shell.quote(ctx.attr.venv), git = _TREE_GIT if ctx.attr.git else "",
+    repos, files = _repos(ctx)
+    body = _TREE_TEST.format(venv = shell.quote(ctx.attr.venv), git = _TREE_GIT if ctx.attr.git else "", repos = repos,
                              cmd = " ".join([shell.quote(w) for w in ctx.attr.cmd]))
     ctx.actions.write(script, body, is_executable = True)
-    return [DefaultInfo(executable = script, runfiles = ctx.runfiles(files = ctx.files.data))]
+    return [DefaultInfo(executable = script, runfiles = ctx.runfiles(transitive_files = depset(ctx.files.data, transitive = files)))]
 
 tree_test = rule(
     implementation = _tree_test_impl,
@@ -39,6 +50,7 @@ tree_test = rule(
         "cmd": attr.string_list(mandatory = True, doc = "the check's command, run from the copy's root"),
         "data": attr.label_list(allow_files = True, doc = "the files it reads: the tree, or the part of it the check reads"),
         "git": attr.bool(default = False, doc = "the copy a git index of its files, for a check that asks git what is tracked"),
+        "repos": attr.label_keyed_string_dict(allow_files = True, doc = _REPOS_DOC),
         "venv": attr.string(mandatory = True, doc = "the environment's store venv, whose tools are on PATH"),
     },
     doc = "A check over the tree's tracked files, the environment's tools on PATH: one test, cached on what it reads.",
@@ -177,7 +189,7 @@ cp -rL "$TEST_SRCDIR/_main" "$tree"
 rm -f "$tree/$TEST_BINARY"
 cd "$tree"
 {machine}export PATH={venv}/bin:/usr/bin:/bin PYTHONPATH="$tree" PYTHONDONTWRITEBYTECODE=1
-{toolkit}{run}"""
+{toolkit}{repos}{run}"""
 
 #: the graph's copy of a pinned CUDA toolkit, the tree its nvcc runs in, handed to the tests (`FSLA_CUDA_HOME`)
 _TOOLKIT = 'export FSLA_CUDA_HOME="$(dirname "$(dirname "$(readlink -f "$TEST_SRCDIR/_main/{nvcc}")")")"\n'
@@ -228,9 +240,11 @@ def _tier_impl(ctx):
     else:
         words = list(ctx.attr.tests) + (["-m", ctx.attr.marks] if ctx.attr.marks else [])
         run = _PYTEST_RUN.format(venv = venv, args = " ".join([shell.quote(w) for w in words]))
-    carried = [target.files for target in ctx.attr.tools]
+    repos, repo_files = _repos(ctx)
+    carried = [target.files for target in ctx.attr.tools] + repo_files
     toolkit = _TOOLKIT.format(nvcc = ctx.file.nvcc.short_path) if ctx.attr.nvcc else ""
-    body = _TIER.format(venv = venv, machine = "" if ctx.attr.devices else _NO_DEVICE, toolkit = toolkit, run = run)
+    body = _TIER.format(venv = venv, machine = "" if ctx.attr.devices else _NO_DEVICE, toolkit = toolkit, repos = repos,
+                        run = run)
     ctx.actions.write(script, body, is_executable = True)
     #: a device tier's pass is its devices': their identity is one of its inputs
     identity = [ctx.file.devices] if ctx.attr.devices else []
@@ -247,6 +261,7 @@ _tier_test = rule(
                                       "is the path of the tool binary of that name"),
         "tools": attr.label_keyed_string_dict(allow_files = True, doc = "the command's tools: each label's binary, by its name"),
         "data": attr.label_list(allow_files = True, doc = "what it reads: the tree and what the graph builds for it"),
+        "repos": attr.label_keyed_string_dict(allow_files = True, doc = _REPOS_DOC),
         "venv": attr.string(mandatory = True, doc = "the environment's store venv"),
         "toolkit": attr.label(doc = "a pinned CUDA toolkit the tests compile, assemble and disassemble with: an input, " +
                                     "so a new one reruns them"),

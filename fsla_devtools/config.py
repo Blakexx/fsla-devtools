@@ -5,9 +5,10 @@ section. A SCHEMA declares each section's keys with their type, default and mean
 section does not declare is refused, so a typo fails loudly instead of silently taking a default, and a missing file or
 key takes the declared default.
 
-`MACHINE` is the part every FSLA repository shares -- the host's locks and budget (`host`) and its clock (`clock`) --
-and `machine(key)` reads it; the locks read nothing else. A repository with sections of its own reads its whole schema
-with `read(schema, owns_directory=True)`, which also refuses a file no section declares (fsla's `tools/dev_config.py`).
+`MACHINE` is the part every FSLA repository shares -- the host's locks and budget (`host`), its clock (`clock`) and
+the measurements store (`store`) -- and `machine(key)` reads it; the locks read nothing else. A repository with
+sections of its own reads its whole schema with `read(schema, owns_directory=True)`, which also refuses a file no
+section declares (fsla's `tools/dev_config.py`).
 
 A setting is never read from the process environment; `POINTER` is the one variable read here, and it names a
 directory, never a value.
@@ -64,6 +65,11 @@ MACHINE: dict[str, dict[str, Key]] = {
         "ghz": Key("float?", None, "the SM clock the harness locks, in GHz; null means this host runs unlocked"),
         "lock": Key("argv?", None, "the command that locks the clock"),
         "unlock": Key("argv?", None, "the command that releases it"),
+    },
+    "store": {
+        "root": Key("path?", None, "the measurements store: a checkout of the data repository (fsla-results), its "
+                    "`records/` the store's backend (fsla_devtools.results), shared by every worktree on the machine; "
+                    "null means no store, and a store opened without a directory of its own refuses"),
     },
 }
 

@@ -1,8 +1,9 @@
 """THE GRAPH'S ENVIRONMENT, every FSLA repository's: a module extension whose tags make the repositories a workspace's
 graph runs on -- a Python environment built from a lock into the machine's shared store (`python`), a release pinned
 by digest (`pinned`), the host C++ compiler's and the machine's devices' identities (`host_cc`, `host_gpu`), a pinned
-CUDA toolkit (`cuda_toolkit`) and the checkout's tracked files (`tree`). The root module names each repository and
-hands it the workspace's own pins and files; nothing here names a workspace. Docs: README.md#the-build-graph.
+CUDA toolkit (`cuda_toolkit`), the checkout's tracked files (`tree`) and the data repository at one commit (`data`).
+The root module names each repository and hands it the workspace's own pins and files; nothing here names a workspace.
+Docs: README.md#the-build-graph.
 
     environment = use_extension("@fsla_devtools//bazel:environment.bzl", "environment")
     environment.pinned(name = "uv", pin = "@fsla_devtools//pins:uv_pin.json", build = UV_BUILD)
@@ -13,7 +14,8 @@ hands it the workspace's own pins and files; nothing here names a workspace. Doc
 """
 
 #: REPRODUCIBLE REPOSITORIES (`repo_metadata(reproducible = True)`): a repository whose content is fixed by its attributes
-#: and the files it reads -- a release by its digest (`pinned`, `cuda_toolkit`), an environment by its lock's key
+#: and the files it reads -- a release by its digest (`pinned`, `cuda_toolkit`), a commit's archive by its digest
+#: (`data`), an environment by its lock's key
 #: (`python`: the store's venv is the lock's and pins', the repository only links it) -- is unpacked once into Bazel's
 #: repo contents cache, which every workspace on the machine shares, and each output base links it. `host_cc`,
 #: `host_gpu` and `tree` are not: they read the machine's compiler, its devices and the workspace's git index, so each
@@ -312,6 +314,35 @@ _tree_repo = repository_rule(
     doc = "The checkout's tracked files (`git ls-files`), by package: the tree the lints read, re-read when the index moves.",
 )
 
+#: what of a data repository's commit is data: everything else is its own graph (its gate), not this one's, and is
+#: dropped; the repository's BUILD file is `data.BUILD`
+_DATA = ("lab", "records")
+
+def _data_impl(rctx):
+    name = rctx.attr.remote.rstrip("/").split("/")[-1]
+    rctx.download_and_extract(
+        url = "%s/archive/%s.tar.gz" % (rctx.attr.remote.rstrip("/"), rctx.attr.commit),
+        sha256 = rctx.attr.sha256,
+        stripPrefix = "%s-%s" % (name, rctx.attr.commit),
+    )
+    for entry in rctx.path(".").readdir():
+        if entry.basename not in _DATA:
+            rctx.delete(entry)
+    rctx.file("BUILD.bazel", rctx.read(rctx.attr._build))
+    return rctx.repo_metadata(reproducible = True)
+
+_data_attrs = {
+    "remote": attr.string(mandatory = True, doc = "the data repository's public URL (a GitHub repository's)"),
+    "commit": attr.string(mandatory = True, doc = "the commit every citation and reader takes the data at"),
+    "sha256": attr.string(mandatory = True, doc = "the digest of that commit's archive"),
+}
+
+_data_repo = repository_rule(
+    implementation = _data_impl,
+    attrs = _data_attrs | {"_build": attr.label(default = "//bazel:data.BUILD")},
+    doc = "The data repository at one commit, by its archive's digest: its `records/` and `lab/`, nothing of its graph.",
+)
+
 def _named(attrs):
     return attrs | {"name": attr.string(mandatory = True, doc = "the repository's name")}
 
@@ -322,6 +353,7 @@ _TAGS = {
     "host_gpu": (_host_gpu_repo, _named({})),
     "cuda_toolkit": (_cuda_toolkit_repo, _named(_cuda_toolkit_attrs)),
     "tree": (_tree_repo, _named({})),
+    "data": (_data_repo, _named(_data_attrs)),
 }
 
 def _environment_impl(mctx):
@@ -336,5 +368,6 @@ environment = module_extension(
     implementation = _environment_impl,
     tag_classes = {kind: tag_class(attrs = attrs) for kind, (_repo, attrs) in _TAGS.items()},
     doc = "The graph's environment, made from the root module's tags: its Python environments, pinned releases, the " +
-          "host compiler's and devices' identities, a pinned CUDA toolkit and the checkout's tracked files.",
+          "host compiler's and devices' identities, a pinned CUDA toolkit, the checkout's tracked files and the data " +
+          "repository at one commit.",
 )

@@ -22,8 +22,6 @@ environment.python(
     name = "devtools_env",
     index = "https://download.pytorch.org/whl/cu130",
     lock = "//:requirements.lock",
-    #: fsla-results, whose store the timing tests write, at its public commit
-    packages = ["fsla-results @ git+https://github.com/Blakexx/fsla-results@90085af6e2ca9c22d3724c0c719ba91b146cdd8c"],
     uv = "@uv//:uv",
     uv_pin = "//pins:uv_pin.json",
 )
