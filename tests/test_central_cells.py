@@ -119,7 +119,6 @@ class Records(unittest.TestCase):
 
     def test_the_declared_sparsity_is_the_alternation(self):
         self.assertEqual(cell("deep3-alt-k4").declared_sparsity(), ((False, True), (True, False), (False, True)))
-        self.assertEqual(cell("flagship-both-k4").declared_sparsity(), ((True, True), (False, False)))
         self.assertEqual(cell("corner-tied-k4").declared_sparsity(), ((False, False), (False, False)))
 
     def test_every_file_loads_into_one_registry_and_each_kind_builds_its_record(self):

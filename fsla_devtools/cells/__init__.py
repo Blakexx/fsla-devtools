@@ -25,7 +25,7 @@ with a name pattern (`"name": "flagship-alt-k4-seed{seed}"`) makes one cell per 
 product). A derivation names bases only, never cells. `derive(name, bases, **fields)` is the same for code that
 generates cells, and `Registry.derived` records each derived cell's bases, so a reading can group them.
 
-    {"schema": 1, "data": "fsla_devtools.cells.carry:carry_cell", "cells": [{"name": "flat-small-alt-k16", ...}]}
+    {"schema": 1, "data": "fsla_devtools.cells.carry:carry_cell", "cells": [{"name": "flagship-alt-k16", ...}]}
 
 Which cells launch together, and what they hold equal, is a declaration's (a root's cell lists), never the registry's.
 
