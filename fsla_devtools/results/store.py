@@ -137,6 +137,14 @@ def _uncommitted(provenance: dict) -> str | None:
     return f"checkouts {missing} name no commit" if missing else None
 
 
+def _dirty(provenance: dict) -> list[str]:
+    """The checkouts a sample's provenance names whose tree held uncommitted changes (a `diff_sha256`)."""
+    checkouts = provenance.get("checkouts")
+    if not isinstance(checkouts, dict):
+        return []
+    return sorted(owner for owner, ident in checkouts.items() if isinstance(ident, dict) and ident.get("diff_sha256"))
+
+
 def label_path(label: str) -> Path:
     """A label's folder under the records directory: `<workspace>/<package>/<target>`."""
     found = _LABEL.match(label)
@@ -148,10 +156,12 @@ def label_path(label: str) -> Path:
 
 class Store:
     """The samples of one producing target, by its label. `root` is the records directory; the default is the
-    machine's store (`backend()`)."""
+    machine's store (`backend()`). `scratch`: a store a tool keeps for a run it does not record (`--no-store`), the one
+    store that takes a sample of an uncommitted tree."""
 
-    def __init__(self, label: str, root: Path | str | None = None):
+    def __init__(self, label: str, root: Path | str | None = None, *, scratch: bool = False):
         self.label = label
+        self.scratch = scratch
         self.root = backend(root)
         self.dir = self.root / label_path(label)
 
@@ -176,7 +186,9 @@ class Store:
         its name (a relative path of plain names); a failure hands `error`. `provenance` is what the tool knows of where
         the sample came from (its checkouts, a stage); the host is added. `run` names the sample (`run_id()` when not
         given). `timing`: the sample is a timing, which names the commit of every checkout it ran
-        (`provenance["checkouts"]`, each a `checkout()`), or it is refused. `extra` is kept on the sample as given.
+        (`provenance["checkouts"]`, each a `checkout()`), or it is refused. A stored number names a commit: a checkout
+        the provenance names with uncommitted changes is refused, except in a `scratch` store (Blake, 2026-11-27).
+        `extra` is kept on the sample as given.
         `unless_stored`: when a sample of these semantics already holds this outcome -- a success whose output has these
         bytes, or a failure with this error -- nothing is written and None is returned (a build output stored again; a
         measurement stores every run)."""
@@ -188,6 +200,10 @@ class Store:
             why = _uncommitted(provenance or {})
             if why:
                 raise ValueError(f"{self.label}: a timing is stored only against the commits it ran, and {why}")
+        dirty = [] if self.scratch else _dirty(provenance or {})
+        if dirty:
+            raise ValueError(f"{self.label}: a stored number names a commit, and checkouts {dirty} have uncommitted "
+                             "changes: commit them (a measured variant is a commit), or run without storing")
         stored = [semantics, output, error, provenance, extra, sorted(parts or {})]
         files = ([output_file] if output_file is not None else []) + list((parts or {}).values())
         stored += [_content(Path(f)) for f in files]

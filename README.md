@@ -243,7 +243,12 @@ store.put(semantics, output_file=path, unless_stored=True)   # None, storing not
 store.put(semantics, output_file=result, parts={"trace/row0.json": row})   # the files the same run wrote beside it
 store.put(semantics, output_file=session, provenance=provenance, timing=True)  # a timing: refused without its commits
 store.samples(key(semantics))                       # newest first; store.output(sample), store.parts(sample)
+Store(label, root, scratch=True)                    # a run not recorded (--no-store): takes an uncommitted tree
 ```
+
+- **A stored number names a commit** (Blake, 2026-11-27): a sample whose provenance names a checkout with uncommitted
+  changes (a `diff_sha256`) is refused, a timing or not; a measured variant is a commit. Only a `scratch` store, the one
+  a tool keeps for a run it does not record, takes one.
 
 - **A label** names who produced it: `@<workspace>//<package>:<target>`, the workspace the repository's module name
   (`@fsla//measure:session_entmax`, `@fsla//measure/lab:add_rate.run`, `@fsla//:container_check`). Every store rule

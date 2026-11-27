@@ -167,6 +167,17 @@ class StoreContract(unittest.TestCase):
         self.put({"cell": "t"}, timing, output={"ms": 1.0}, provenance=COMMITTED, timing=True)
         self.assertEqual(labels(self.root), ["@fsla//measure:session"])
 
+    def test_a_stored_number_names_a_commit_and_only_a_scratch_store_takes_an_uncommitted_tree(self) -> None:
+        """Any sample whose provenance names a checkout with uncommitted changes is refused, a timing or not; a scratch
+        store (a run not recorded) takes it."""
+        dirty = {"checkouts": {"tip": {"checkout": "tip", "git_sha": "a" * 40, "diff_sha256": "b" * 64}}}
+        for timing in (False, True):
+            with self.assertRaisesRegex(ValueError, "names a commit.*uncommitted"):
+                self.put({"cell": "d"}, output={"ms": 1.0}, provenance=dirty, timing=timing)
+        self.assertEqual(labels(self.root), [])
+        self.put({"cell": "d"}, Store(LABEL, self.root, scratch=True), output={"ms": 1.0}, provenance=dirty, timing=True)
+        self.assertEqual(len(self.store.samples()), 1)
+
     def test_a_record_carries_no_machine_path_of_any_root(self) -> None:
         """Any absolute path is refused, a home directory's, a container's or a rented box's alike (audit C4); a ratio,
         a relative path, a URL and a path spelled from `~` are not paths on a machine."""
