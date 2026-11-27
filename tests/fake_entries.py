@@ -50,6 +50,14 @@ def unbuilt(cell, params) -> Timed:
     raise LookupError(f"{cell.name}: this binary carries no kernel for it")
 
 
+def probe(cell, params) -> Timed:
+    """What a worker runs under: the locks its session holds (the markers it inherited) and its priority."""
+    nice = os.nice(0)
+    return Timed(call=lambda: 1.0, built={"gpu": os.environ.get("FSLA_GPU_LOCK_HELD"),
+                                          "host": os.environ.get("FSLA_HOST_BUDGET_HELD"), "nice": nice},
+                 instrument="fixed")
+
+
 def other_clock(cell, params) -> Timed:
     return Timed(call=lambda: 1.0, built={}, instrument="another")
 

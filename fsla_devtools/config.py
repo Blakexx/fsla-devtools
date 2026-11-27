@@ -45,7 +45,8 @@ MACHINE: dict[str, dict[str, Key]] = {
         "gpu_lock": Key("path", "/tmp/fsla-locks/fsla_gpu.lock", "the GPU lock file, in the lock directory, so one mount "
                         "shares every lock"),
         "gpu_shared_slots": Key("int", 2, "correctness runs that may hold the GPU lock shared at once"),
-        "nice": Key("bool", True, "locked processes lower their own CPU and IO priority"),
+        "nice": Key("bool", True, "a shared GPU holder (a correctness run) and a command under the host budget's CLI "
+                    "lower their own CPU and IO priority; a measurement never does"),
         "locks_trace": Key("bool", False, "print every lock acquire and release to stderr"),
         "scratch": Key("path", "/tmp/fsla", "the tools' scratch root; never read back as a record"),
         "build_cache": Key("path", "~/.cache/fsla/build", "the build system's cache of completed targets and run "

@@ -7,19 +7,19 @@ carry it. It is a development dependency: nothing a user installs imports it.
 |---|---|
 | `fsla_devtools.mirror` | the declarations (`.github/mirror/declarations.json`), their check and the private-shaped content the tripwire refuses, run by each repository's commit gate |
 | `fsla_devtools.tripwire` | the content checks over a staged diff or a pushed range, run by each repository's pre-commit and pre-push hooks |
-| `fsla_devtools.cells` | the central cell registry: every input an FSLA measurement or test runs on (carry, layer, producer, QKV), its draw, its seed and the regime it proves, named once; bases and the cells derived from them; each cell declarable as a build NODE whose output is its record |
+| `fsla_devtools.cells` | the central cell registry: every input an FSLA measurement or test runs on (carry, layer, producer, QKV), its draw, its seed and the regime it proves, named once; bases and the cells derived from them; each cell's DESCRIPTION (its record and the digest of the code that draws it), a Bazel target (`@<cells>//:<cell>`) or a build NODE's output |
 | `fsla_devtools.build` | the declared build system: targets declared by composable functions in files, keyed by what they read, cached or run in dependency order, holding the machine's resources, each in its own environment's worker |
-| `fsla_devtools.timing` | the timing system, as targets: a server of entry workers, registrations of timed callables on cells, interleaved clock-locked sessions, memory passes, null gates |
+| `fsla_devtools.timing` | the timing system: the session program a Bazel run target starts (`fsla_devtools.timing.session`: interleaved, clock-locked, stored) and its entry workers; and, as targets of the declared build system, a server of entry workers, registrations of timed callables on cells, sessions, memory passes, null gates |
 | `fsla_devtools.diff` | the diff targets: two executors run over the same cells in the environments they name, compared under one rule (bit-identity, the per-slot clause rule, support equality), with a claim the build can fail on -- a difference expected or refused |
 | `fsla_devtools.results` | the results store's code: records under a location, keyed by their semantics, every sample kept, in the data repository (fsla-results); its index and views, the verdict (whether a candidate's timing is a regression against a reference timed in the same sessions), the instruments' deltas and the dashboard |
 | `fsla_devtools.store` | the store target: a result written through `fsla_devtools.results` as a run-stamped sample of its source's record |
 | `fsla_devtools.process` | `subprocess.run` for a command that starts processes of its own: a timeout or an interrupt stops the whole tree |
 | `fsla_devtools.config` | the dev config reader: one directory of JSON files a section, every key declared; the machine's `host`, `clock` and `store` sections every repository shares |
-| `fsla_devtools.locks` | the machine's locks: the GPU lock (exclusive or shared), the host-compute budget and named file locks, the SM clock lock |
+| `fsla_devtools.locks` | the machine's locks: the GPU lock (exclusive or shared), the host-compute budget and named file locks, the SM clock lock (the machine's, counted by its holders) |
 | `fsla_devtools.graph` | the build graph's shared machinery: the front door every repository's Bazel runs through, the environment's store builder, the test tiers' sharding plugin |
 
 The `fsla_devtools` Bazel module (`MODULE.bazel`, `bazel/`) is the rest of the build graph's machinery: its
-environment extension and generic rules (below).
+environment extension, generic rules and measurement rules (below).
 
 ## The declarations and the tripwire
 
@@ -75,9 +75,42 @@ python -m fsla_devtools.build plan declare.py:all
 python -m fsla_devtools.build run  declare.py:all --only 'fsla/phases' --skip '*/timeline'   # prune by label
 ```
 
-## The timing system
+## <a id="timing"></a>The timing system
 
-Timing is a client of the build system (`fsla_devtools.timing`). `start_timing_server` starts a pool of entry workers,
+**A SESSION IS A BAZEL RUN TARGET** (`bazel/measure.bzl`). A `timing_entry` is one executor (`module:function`, called
+with a cell's data and the entry's `params`, returning a `fsla_devtools.timing.Timed`: set up, call, reset, one
+stopwatch) on cells named as targets (`cell`, which the environment extension's `cells` tag declares one of for every
+central cell: its description, never its tensors), with its BUNDLE -- its runfiles (the code it imports, what that code
+reads, files `layout` puts where the code reads them) and `<name>.bundle.json`: the workspace's stamp (the commit,
+branch, checkout name and uncommitted diff digest its `--workspace_status_command` writes as `STABLE_GIT_COMMIT`,
+`STABLE_GIT_BRANCH`, `STABLE_GIT_DIFF_SHA256`, `STABLE_CHECKOUT`; a workspace that stamps none is refused), the digest of
+every file the bundle holds, and its environment. `kind = "clock"` is the in-kernel clock read that proves a session's
+lock. An `interleaved_timing` names entries, a clock reader, `rounds`, `reps`, `warmup`, the store's `location` and a
+`claim`, and `bazel run` starts the SESSION PROGRAM (`python -m fsla_devtools.timing.session`, on the checkout's own
+venv) on its manifest:
+
+```bash
+bazel run //measure:session_entmax                     # measure, store one timing/session sample
+bazel run //measure:session_entmax -- --no-store       # measure, keep session.json in the scratch, store nothing
+bazel run //measure:session_entmax -- --store-root DIR --scratch DIR
+```
+
+The program takes the GPU lock exclusive, then the host budget whole, then the machine's clock lock, and lowers no
+priority; refuses a host whose dev config declares no clock lock unless the claim is `unlocked`, and a locked host's
+session without a clock reader; starts one entry worker per bundle, on the bundle's interpreter with the bundle's
+runfiles as its whole import path; sets every entry up on each of its cells behind a barrier, each worker reporting the
+digest of the code it draws cells with and the file each module the entry `binds` was loaded from -- a foreign draw or
+a module loaded from outside the bundle is that member's failure; refuses two stopwatches; proves the clock; warms each
+member past `WARMUP_FLOOR` calls and times rounds x reps in a fresh order each rep, seeded from the run's identity (the
+seed is stored); reads the clock again. A session in which no member set up fails, naming the first refusal. It stores
+ONE sample: the semantics are what ran (each entry's executor, parameters, cells, bundle digest and environment, the
+timing parameters, whether the clock was locked, the machine's devices), the provenance each bundle's stamp. A failed
+session stores nothing and keeps its samples in the scratch directory, named. A second form of an entry (one call
+captured once and replayed) is another executor over the same bundle and cells, declared as its own target, so its label
+is never its eager twin's.
+
+**AS TARGETS OF THE DECLARED BUILD SYSTEM** (`fsla_devtools.timing.declare`, the same interleaving loop,
+`fsla_devtools.timing.session.interleave`): `start_timing_server` starts a pool of entry workers,
 one per checkout environment; `register_timing` is one target registering a checkout's timed callable on every cell it
 takes, as ENTRIES; `measure_timing` is a session over the entries of any registrations: every entry set up behind a
 barrier, warmed past a floor of 10 calls, then called one at a time in a fresh random order each rep, with the entry's
@@ -247,9 +280,12 @@ with host.acquire(4, label="tidy"):   # up to 4 host-compute slots, at least one
 `python -m fsla_devtools.locks.host [--slots N] [--exclusive] -- <command...>` runs a command under the budget, and
 `python -m fsla_devtools.locks.gpu [--shared] -- <command...>` one under the GPU lock (a binary with no `gpu_lock()` of
 its own: `cuda-gdb`, `ncu` by hand). A nested
-acquire in the same process or a child is a no-op, so an outer tool that locks can start an inner tool that locks.
-`fsla_devtools.locks.clock.engage(read_ghz)` locks the clock the host declares, proves it with the device's own reading,
-and unlocks on every exit.
+acquire in the same process or a child is a no-op, so an outer tool that locks can start an inner tool that locks. A
+shared GPU holder and the budget's CLI command lower their own priority (`host.nice`); an exclusive holder, a
+measurement, never does. `with fsla_devtools.locks.clock.held():` holds the machine's clock lock the host declares: its
+first holder on the machine runs the lock command and its last runs the unlock, each holder a locked file under
+`host.lock_dir`, so one process exiting never unlocks the clock under another's session; the caller proves the lock with
+the device's own reading (`within`).
 
 ## The build graph
 
@@ -274,11 +310,12 @@ runs, and holds the host budget around each build phase. `bazel --commit-gate` i
 | `host_cc`, `host_gpu` | the host C++ compiler's and the machine's devices' identities, which actions that depend on them are keyed on |
 | `tree` | the checkout's tracked files (`git ls-files`; the commit's index under the commit gate) |
 | `data` | the data repository at one commit (`remote`, `commit`, the `sha256` of the commit's archive): its `records/` and `lab/`, as `:records`, `:lab`, each file by its path, and `:root` (its BUILD file, which names the root) (`bazel/data.BUILD`), nothing of its own graph -- what a workspace's citations and readers take, fixed content at the pin |
+| `cells` | every central cell's description as a target (`@<name>//:<cell>`, a `cell` of `bazel/measure.bzl`), generated from this module's registry on the machine's `python3` |
 
 `python`, `pinned`, `cuda_toolkit` and `data` are REPRODUCIBLE repositories (`repo_metadata(reproducible = True)`: their result
 is fixed by their pins and the files they read), so Bazel unpacks each once into the repo contents cache
-(`host.build_cache`'s `repository/contents`) and every checkout's output base links it; `host_cc`, `host_gpu` and `tree`
-read the machine or the workspace and are made per checkout.
+(`host.build_cache`'s `repository/contents`) and every checkout's output base links it; `host_cc`, `host_gpu`, `tree`
+and `cells` read the machine or the workspace and are made per checkout.
 
 **The environment store is bounded.** `host.store_max_gb` and `host.store_max_age_days` (the dev config) bound the store
 the `python` tag builds into: each environment build sweeps, under the store's lock, the environments idle past the age
@@ -294,6 +331,10 @@ argument; a workspace wraps them once with its own. A check over the tree or a t
 files names it in `repos` (a label of it -> a variable): its files join the runfiles and its root is exported as that
 variable (`{"@fsla_data//:lab": "FSLA_DATA"}`, the pinned data). **The results store's rules** (`bazel/results.bzl`): the records'
 index as a build output (`results_index`), a data repository's.
+
+**The measurement rules** (`bazel/measure.bzl`): a cell's description (`cell`), a timing entry with its bundle
+(`timing_entry`) and an interleaved session over entries that `bazel run` measures and stores (`interleaved_timing`),
+[above](#timing).
 
 ## Tests and the gate
 

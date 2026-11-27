@@ -1,18 +1,19 @@
 """THE TIMING TARGETS' EXECUTORS. `register` and `register_clock` run in a checkout's environment; the rest in the
-build system's own, sharing the server (`pool.SERVER`) that start_server leaves in that worker."""
+build system's own, sharing the server (`pool.SERVER`) that start_server leaves in that worker. A session interleaves
+its entries with the session program's own loop (`fsla_devtools.timing.session.interleave`)."""
 from __future__ import annotations
 
 import json
 import os
-import random
 import sys
 from pathlib import Path
 
 from ..build.resources import MARKERS
 from ..build.worker import load
+from ..cells import draw_digest
 from ..locks import clock
 from . import pool
-from .entry_worker import _draw
+from .session import Member, interleave
 
 
 def _here(ctx) -> dict:
@@ -84,55 +85,15 @@ def _session(ctx, entries: list[dict], reader) -> dict:
     before = _read_clock(srv, reader, markers)
     if cfg is not None and not clock.within(before, cfg):
         raise RuntimeError(f"CLOCK: the device reads {before} GHz before the session, off the lock at {cfg['ghz']} GHz")
-    p, draw = ctx.params, _draw()
-    members, set_up, instruments = [], [], []
-    try:
-        for i, entry in enumerate(entries):
-            member = {"id": f"m{i}", "owner": entry["owner"], "cell": entry["cell"], "executor": entry["executor"]}
-            members.append(member)
-            worker = srv.worker(entry["env"])
-            reply = worker.ask({"op": "setup", "id": f"{ctx.run}:{ctx.label}:{i}", "executor": entry["executor"],
-                                "cell": entry["record"], "params": entry["params"], "env": markers}, member["id"])
-            if "failed" in reply:
-                member.update(status="failed", error=_portable(reply["failed"]))
-                continue
-            set_up.append((member, worker, f"{ctx.run}:{ctx.label}:{i}"))
-            if reply["ready"]["draw"] != draw:
-                member.update(status="failed", error="the checkout's fsla_devtools draws cells with other code than the "
-                                                     "build system's")
-                continue
-            member.update(status="ok", built=reply["ready"]["built"], instrument=reply["ready"]["instrument"])
-        #: THE BARRIER: every entry has set up before any timed call
-        live = [(m, w, i) for m, w, i in set_up if m["status"] == "ok"]
-        instruments = sorted({m["instrument"] for m, _w, _i in live})
-        if len(instruments) > 1:
-            raise RuntimeError(f"one session, one stopwatch: its entries time with {instruments}")
-
-        def call(member, worker, ident, what) -> float | None:
-            """One call, or None where the ENTRY failed it: a call that raises is that entry's domain failure -- it is
-            recorded and dropped from the session, and the rest are timed (a worker that DIES is the build's)."""
-            reply = worker.ask({"op": "call", "id": ident, "env": markers}, what)
-            if "failed" in reply:
-                member.update(status="failed", error=_portable(reply["failed"]))
-                live[:] = [row for row in live if row[0] is not member]
-                return None
-            return reply["ms"]
-
-        for _ in range(p["warmup"]):
-            for member, worker, ident in list(live):
-                call(member, worker, ident, "warmup")
-        rng, samples = random.Random(p["seed"]), []
-        for rnd in range(p["rounds"]):
-            for rep in range(p["reps"]):
-                for position, (member, worker, ident) in enumerate(rng.sample(live, len(live))):
-                    ms = call(member, worker, ident, member["id"])
-                    if ms is None:
-                        continue
-                    samples.append({"member": member["id"], "round": rnd, "rep": rep, "position": position, "ms": ms})
-    finally:
-        for _m, worker, ident in set_up:
-            if worker.alive:
-                worker.ask({"op": "drop", "id": ident}, "drop")
+    p = ctx.params
+    #: a worker draws with the build system's own cell code, or its member is refused
+    members = [Member(record={"id": f"m{i}", "owner": entry["owner"], "cell": entry["cell"], "executor": entry["executor"]},
+                      worker=srv.worker(entry["env"]), draw=draw_digest(), ident=f"{ctx.run}:{ctx.label}:{i}",
+                      setup={"executor": entry["executor"], "cell": entry["record"], "params": entry["params"]})
+               for i, entry in enumerate(entries)]
+    samples, instruments = interleave(members, rounds=p["rounds"], reps=p["reps"], warmup=p["warmup"], seed=p["seed"],
+                                      env=markers, portable=_portable)
+    members = [m.record for m in members]
     after = _read_clock(srv, reader, markers)
     session = {"session": ctx.label, "run": ctx.run, "claim": p.get("claim", ""), "instrument": instruments[0] if instruments
                else None, "rounds": p["rounds"], "reps": p["reps"], "warmup": p["warmup"], "seed": p["seed"],

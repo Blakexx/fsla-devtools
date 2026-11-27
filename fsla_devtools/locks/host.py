@@ -83,7 +83,8 @@ def trace(msg: str) -> None:
 
 
 def lower_priority(who: str) -> None:
-    """A locked process lowers its own CPU and IO priority (`host.nice`); children it starts inherit both."""
+    """A process lowers its own CPU and IO priority (`host.nice`); children it starts inherit both. A shared GPU holder
+    and the CLI's command do; a measurement (an exclusive GPU holder, a timing session) never does."""
     if not machine("host.nice"):
         return
     with contextlib.suppress(OSError):

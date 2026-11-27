@@ -1,9 +1,9 @@
 """The timing targets, declared: helpers a declaration file calls on its graph (`fsla_devtools.build.declare.Graph`)."""
 from __future__ import annotations
 
+from .session import WARMUP_FLOOR, check_shape
+
 EXECUTORS = "fsla_devtools.timing.executors:"
-#: launches of each entry discarded before any is recorded: the first build schedules and warm caches
-WARMUP_FLOOR = 10
 
 
 def start_timing_server(g, name: str = "timing-server"):
@@ -32,8 +32,7 @@ def register_clock_reader(g, name: str, *, server, env, executor: str, deps: dic
 def measure_timing(g, name: str, *, server, entries, clock=None, cells=None, rounds: int = 8, reps: int = 11,
                    warmup: int = WARMUP_FLOOR, seed: int = 0, claim: str = ""):
     """A session over the entries `entries` register (on `cells` only, when given)."""
-    if warmup < WARMUP_FLOOR or reps % 2 == 0 or rounds < 1:
-        raise ValueError(f"{name}: warmup at least {WARMUP_FLOOR}, odd reps and a round, got {warmup}, {reps}, {rounds}")
+    check_shape(rounds, reps, warmup, name)
     deps = {"server": server, **{f"r{i}": e for i, e in enumerate(entries)}, **({"clock": clock} if clock else {})}
     return g.node(name, executor=EXECUTORS + "measure", deps=deps, holds={"gpu": "all", "clock": 1}, cache=False,
                   params={"cells": list(cells) if cells is not None else None, "rounds": rounds, "reps": reps,
@@ -44,8 +43,7 @@ def measure_null_gate(g, name: str, *, server, entry, clock=None, cells=None, ro
                       warmup: int = WARMUP_FLOOR, seed: int = 0):
     """A null gate over what one registration `entry` registers (on `cells` only, when given): each entry timed against
     itself in a second worker, so a comparison across workers is trusted only where the gate finds no worker's bias."""
-    if warmup < WARMUP_FLOOR or reps % 2 == 0 or rounds < 1:
-        raise ValueError(f"{name}: warmup at least {WARMUP_FLOOR}, odd reps and a round, got {warmup}, {reps}, {rounds}")
+    check_shape(rounds, reps, warmup, name)
     deps = {"server": server, "r0": entry, **({"clock": clock} if clock else {})}
     return g.node(name, executor=EXECUTORS + "null_gate", deps=deps, holds={"gpu": "all", "clock": 1}, cache=False,
                   params={"cells": list(cells) if cells is not None else None, "rounds": rounds, "reps": reps,

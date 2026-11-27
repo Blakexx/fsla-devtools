@@ -33,6 +33,7 @@ Standard library only: a registry loads and checks without torch; realizing a ce
 """
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 from functools import cache
@@ -149,3 +150,20 @@ def derive(name: str, bases=(), **fields) -> dict:
 def cell(name: str):
     """A central cell's typed record (`CarryCell`, `LayerCell`, `QKVCell`) by name."""
     return build(central().cell(name))
+
+
+def draw_digest() -> str:
+    """sha256 over this package's own `.py` and `.json` files, name and bytes each: what a cell's data is drawn BY. A
+    worker reports it, so one drawing with other code than its description names is refused instead of compared."""
+    h = hashlib.sha256()
+    for path in sorted(p for p in FILES[0].parent.iterdir() if p.suffix in (".py", ".json")):
+        h.update(path.name.encode() + b"\0" + path.read_bytes() + b"\0")
+    return h.hexdigest()
+
+
+def descriptions() -> dict[str, dict]:
+    """Every central cell's DESCRIPTION -- its record (provider, parameters, seed) and the digest of the code that draws
+    it -- by name: what a cell is as a build output (the environment extension's `cells` tag writes one file a cell),
+    never its tensors, which the worker that runs the cell draws from the seed the record states."""
+    draw = draw_digest()
+    return {name: {**record, "draw": draw} for name, record in sorted(central().cells.items())}

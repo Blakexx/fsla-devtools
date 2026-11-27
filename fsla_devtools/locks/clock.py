@@ -11,16 +11,21 @@ config's `clock.json` (`fsla_devtools.config`; fsla's `python tools/dev.py clock
      "lock":   ["/mnt/c/Windows/System32/schtasks.exe", "/run", "/tn", "gpu-lock"],
      "unlock": ["/mnt/c/Windows/System32/schtasks.exe", "/run", "/tn", "gpu-unlock"]}
 
-The harness locks at start, proves the lock with the in-kernel clock read, unlocks on every
-exit path, and refuses a row whose measured clock is off the lock. Without a clock a run is
-UNLOCKED: rows carry their measured clock and are marked so in the ledger, as dirty rows are.
+ONE LOCK FOR THE MACHINE, COUNTED BY ITS HOLDERS. The clock is the machine's, so `held()` is too: every holder, in any
+process of any repository or container sharing `host.lock_dir`, keeps a holder file there locked for as long as it holds.
+The first holder runs the lock command and only the last one out runs the unlock, so one process finishing never unlocks
+the clock under another's session. A holder that dies without releasing leaves its file unlocked, and the next count
+drops it. The proof is the caller's: it reads the device's clock and judges the reading with `within`. Without a clock a
+host runs UNLOCKED, which a caller states rather than assumes.
 """
 from __future__ import annotations
 
-import atexit
-import signal
+import contextlib
+import fcntl
+import os
 import subprocess
-import sys
+from collections.abc import Iterator
+from pathlib import Path
 
 from ..config import directory, machine
 
@@ -49,40 +54,83 @@ def within(ghz: float | None, cfg: dict | None) -> bool:
     return cfg is None or (ghz is not None and abs(ghz - cfg["ghz"]) <= TOLERANCE * cfg["ghz"])
 
 
-#: the lock this process engaged, released at its exit
-_ENGAGED: list = []
+def _dir() -> Path:
+    path = Path(machine("host.lock_dir")) / "fsla_clock"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
-def lock() -> dict | None:
-    """Engage the host's clock lock once for this process and release it when the process exits, without proving it:
-    the proof reads the device, which the caller does against `within`. None on a host that runs unlocked."""
-    cfg = load()
-    if cfg is None or _ENGAGED:
-        return cfg
-    _run(cfg["lock"])
-    _ENGAGED.append(cfg)
-    atexit.register(_run, cfg["unlock"])
-    return cfg
+def holders() -> int:
+    """How many live holders the machine's clock lock has; a dead holder's file is removed."""
+    count = 0
+    for path in _dir().glob("holder.*"):
+        try:
+            fd = os.open(path, os.O_RDWR)
+        except FileNotFoundError:
+            continue
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            count += 1
+        else:
+            path.unlink(missing_ok=True)
+        finally:
+            os.close(fd)
+    return count
 
 
-def engage(read_ghz) -> dict | None:
-    """lock, prove it with the device read, and arrange the unlock for every exit."""
+@contextlib.contextmanager
+def _admission() -> Iterator[None]:
+    """Counting and engaging, or leaving and releasing, one holder at a time."""
+    fd = os.open(_dir() / "admission.lock", os.O_CREAT | os.O_RDWR, 0o666)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+#: this process's holds: a nested hold opens no second holder file
+_HELD: list[int] = []
+
+
+@contextlib.contextmanager
+def held() -> Iterator[dict | None]:
+    """The host's clock lock held for the block -- engaged by the machine's first holder, released by its last -- and
+    the declared lock yielded; None on a host that runs unlocked, where nothing is held."""
     cfg = load()
     if cfg is None:
-        print("CLOCK: unlocked (no clock in the dev config); rows carry their measured clock",
-              file=sys.stderr)
-        return None
-    _run(cfg["lock"])
+        yield None
+        return
+    if _HELD:
+        _HELD.append(_HELD[-1])
+        try:
+            yield cfg
+        finally:
+            _HELD.pop()
+        return
+    path = _dir() / f"holder.{os.getpid()}"
+    with _admission():
+        first = holders() == 0
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o666)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            if first:
+                _run(cfg["lock"])
+        except BaseException:
+            path.unlink(missing_ok=True)
+            os.close(fd)
+            raise
+    _HELD.append(fd)
+    try:
+        yield cfg
+    finally:
+        _HELD.pop()
+        with _admission():
+            path.unlink(missing_ok=True)
+            os.close(fd)
+            if holders() == 0:
+                _run(cfg["unlock"])
 
-    def release(*_):
-        _run(cfg["unlock"])
 
-    atexit.register(release)
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, lambda s, f: (release(), sys.exit(128 + s)))
-    ghz = read_ghz()
-    if ghz is None or not within(ghz, cfg):
-        raise SystemExit(f"CLOCK: lock to {cfg['ghz']} GHz not proven; the device reads "
-                         f"{ghz} GHz. Refusing to measure.")
-    print(f"CLOCK: locked at {ghz:.3f} GHz (declared {cfg['ghz']})", file=sys.stderr)
-    return cfg
+__all__ = ["TOLERANCE", "held", "holders", "load", "within"]

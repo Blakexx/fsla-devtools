@@ -1,9 +1,9 @@
 """THE GRAPH'S ENVIRONMENT, every FSLA repository's: a module extension whose tags make the repositories a workspace's
 graph runs on -- a Python environment built from a lock into the machine's shared store (`python`), a release pinned
 by digest (`pinned`), the host C++ compiler's and the machine's devices' identities (`host_cc`, `host_gpu`), a pinned
-CUDA toolkit (`cuda_toolkit`), the checkout's tracked files (`tree`) and the data repository at one commit (`data`).
-The root module names each repository and hands it the workspace's own pins and files; nothing here names a workspace.
-Docs: README.md#the-build-graph.
+CUDA toolkit (`cuda_toolkit`), the checkout's tracked files (`tree`), the data repository at one commit (`data`) and
+every central cell's description as a target (`cells`, `bazel/measure.bzl`'s `cell`). The root module names each
+repository and hands it the workspace's own pins and files; nothing here names a workspace. Docs: README.md#the-build-graph.
 
     environment = use_extension("@fsla_devtools//bazel:environment.bzl", "environment")
     environment.pinned(name = "uv", pin = "@fsla_devtools//pins:uv_pin.json", build = UV_BUILD)
@@ -19,7 +19,7 @@ Docs: README.md#the-build-graph.
 #: (`python`: the store's venv is the lock's and pins', the repository only links it) -- is unpacked once into Bazel's
 #: repo contents cache, which every workspace on the machine shares, and each output base links it. `host_cc`,
 #: `host_gpu` and `tree` are not: they read the machine's compiler, its devices and the workspace's git index, so each
-#: workspace makes its own.
+#: workspace makes its own; nor is `cells`, a few kilobytes generated from the registry on the machine's python3.
 
 def _store(rctx):
     store = rctx.getenv("FSLA_GRAPH_STORE")
@@ -343,6 +343,35 @@ _data_repo = repository_rule(
     doc = "The data repository at one commit, by its archive's digest: its `records/` and `lab/`, nothing of its graph.",
 )
 
+_CELLS_BUILD = """\
+\"\"\"GENERATED from fsla_devtools' central cell registry (`fsla_devtools.cells.descriptions`): one target a cell, its
+description.\"\"\"
+
+load("{rules}", "cell")
+
+package(default_visibility = ["//visibility:public"])
+"""
+
+def _cells_impl(rctx):
+    root = rctx.path(rctx.attr._devtools).dirname
+    #: re-read when the registry or its drawing code moves: the draw digest is over the whole package
+    rctx.watch_tree(root.get_child("fsla_devtools").get_child("cells"))
+    found = rctx.execute([rctx.which("python3"), "-B", "-S", "-c", "import json, sys\nsys.path.insert(0, sys.argv[1])\n" +
+                          "from fsla_devtools.cells import descriptions\nprint(json.dumps(descriptions()))", str(root)])
+    if found.return_code != 0:
+        fail("the central cell registry did not load:\n" + found.stderr)
+    build = [_CELLS_BUILD.format(rules = str(Label("//bazel:measure.bzl")))]
+    for name, description in json.decode(found.stdout).items():
+        rctx.file(name + ".json", json.encode_indent(description) + "\n")
+        build.append('cell(name = "%s", src = "%s.json")\n' % (name, name))
+    rctx.file("BUILD.bazel", "\n".join(build))
+
+_cells_repo = repository_rule(
+    implementation = _cells_impl,
+    attrs = {"_devtools": attr.label(default = "//:pyproject.toml")},
+    doc = "Every central cell as a target (`@<name>//:<cell>`): its description, never its tensors.",
+)
+
 def _named(attrs):
     return attrs | {"name": attr.string(mandatory = True, doc = "the repository's name")}
 
@@ -354,6 +383,7 @@ _TAGS = {
     "cuda_toolkit": (_cuda_toolkit_repo, _named(_cuda_toolkit_attrs)),
     "tree": (_tree_repo, _named({})),
     "data": (_data_repo, _named(_data_attrs)),
+    "cells": (_cells_repo, _named({})),
 }
 
 def _environment_impl(mctx):
@@ -368,6 +398,6 @@ environment = module_extension(
     implementation = _environment_impl,
     tag_classes = {kind: tag_class(attrs = attrs) for kind, (_repo, attrs) in _TAGS.items()},
     doc = "The graph's environment, made from the root module's tags: its Python environments, pinned releases, the " +
-          "host compiler's and devices' identities, a pinned CUDA toolkit, the checkout's tracked files and the data " +
-          "repository at one commit.",
+          "host compiler's and devices' identities, a pinned CUDA toolkit, the checkout's tracked files, the data " +
+          "repository at one commit and the central cells' descriptions.",
 )

@@ -1,37 +1,45 @@
-"""THE ENTRY WORKER: a checkout's timed callables, set up, called, reset and dropped for the timing server.
+"""THE ENTRY WORKER: an entry's timed callables, set up, called, reset and dropped for a session
+(`fsla_devtools.timing.session`) or the timing server.
 
     python -m fsla_devtools.timing.entry_worker
 
 The protocol is JSON lines on the process's original stdout; what an executor prints goes to stderr.
 
-    {"op": "setup", "id", "executor", "cell", "params"}   ->  {"ready": {"built", "instrument", "draw"}} | {"failed": WHY}
+    {"op": "setup", "id", "executor", "cell", "params", "binds"}
+                                     ->  {"ready": {"built", "instrument", "draw", "loaded"}} | {"failed": WHY}
     {"op": "call", "id"}                                  ->  {"ms": MS} | {"failed": WHY}
-    {"op": "call", "id"}                                  ->  {"ms": MS}
     {"op": "drop", "id"}                                  ->  {"dropped": true}
     {"op": "memory", "executor", "cell", "params", "calls"} ->  {"memory": {...}} | {"failed": WHY}
     {"op": "clock", "executor"}                           ->  {"ghz": GHZ | null}
     {"op": "exit"}
 
 A request's `env` holds variables set for that request alone (the lock-held markers). `call` runs the entry's reset
-before timing, untimed. A setup that raises is the entry's failure; any other exception replies {"error": ...}.
+before timing, untimed. `draw` is the digest of the cell code this worker draws with (`fsla_devtools.cells.draw_digest`);
+`loaded` is the file each module of `binds` was imported from, after the set-up, for the session to check it is the
+entry's bundle's. A setup that raises is the entry's failure; any other exception replies {"error": ...}.
 """
 from __future__ import annotations
 
 import gc
+import importlib
 import json
 import os
 import sys
 import traceback
 
-from ..build import identity
 from ..build.worker import load
+from ..cells import draw_digest
 
 
-def _draw() -> str:
-    from .. import cells
-
-    root = cells.FILES[0].parent
-    return identity.files(root, sorted(p.name for p in root.iterdir() if p.suffix in (".py", ".json")))
+def _loaded(binds) -> dict[str, str]:
+    """Where each bound module was loaded from, as this process imported it: its directory resolved, the file itself
+    not (a bundle's runfiles are real directories of links into the trees that made them, and the check is that the
+    import went through the bundle)."""
+    out = {}
+    for name in binds:
+        path = importlib.import_module(name).__file__
+        out[name] = os.path.join(os.path.realpath(os.path.dirname(path)), os.path.basename(path))
+    return out
 
 
 def _cell(record):
@@ -94,7 +102,8 @@ def serve() -> None:
                     #: the build's own blocks back to the device (a cell drawn in fp64 is gigabytes the entry never
                     #: reads again): a session holds every member set up at once, and only what each keeps is live
                     _release()
-                    reply = {"ready": {"built": timed.built, "instrument": timed.instrument, "draw": _draw()}}
+                    reply = {"ready": {"built": timed.built, "instrument": timed.instrument, "draw": draw_digest(),
+                                       "loaded": _loaded(request.get("binds", ()))}}
             elif op == "call":
                 timed = live[request["id"]]
                 try:

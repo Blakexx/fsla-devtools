@@ -6,7 +6,10 @@ tests/unit/test_locks_accounting.py and test_lock_priority.py).
 - A nested acquire under an ancestor's marker is a no-op that opens no lock file.
 - The GPU lock's modes: shared holders share a fixed pool; an exclusive acquire waits for every shared holder, and a
   shared acquire queued behind it waits too.
-- A held GPU lock lowers the holder's priority, so a child it starts runs at nice 10, unless `host.nice` is false.
+- A shared GPU holder lowers its priority, so a child it starts runs at nice 10, unless `host.nice` is false; an
+  exclusive holder (a measurement) never does.
+- The clock lock is the machine's: the first holder engages it, a second process leaving does not release it, the last
+  one out does, and a holder that died is not counted.
 - The dev config reader refuses an undeclared key and an undeclared file, and takes a missing key's default.
 `python -m unittest tests.test_locks`"""
 from __future__ import annotations
@@ -44,7 +47,7 @@ READ_NICE = ("import pathlib, sys\n"
              "sys.stdout.write(raw[raw.rindex(')') + 2:].split()[19 - 3])\n")
 NICE_UNDER_GPU_LOCK = ("import subprocess, sys\n"
                        "from fsla_devtools.locks.gpu import gpu_lock\n"
-                       "with gpu_lock(sys.argv[1]):\n"
+                       "with gpu_lock(sys.argv[1], mode=sys.argv[2]):\n"
                        f"    sys.stdout.write(subprocess.run([sys.executable, '-c', {READ_NICE!r}], capture_output=True, "
                        "text=True, check=True).stdout)\n")
 
@@ -180,15 +183,71 @@ class GpuLock(Configured):
         self.assertEqual(self.line(exclusive, TIMEOUT_S), "ACQUIRED\n")
         self.release(exclusive)
 
-    def test_a_holder_lowers_its_childrens_priority_unless_nice_is_off(self):
+    def test_a_shared_holder_lowers_its_childrens_priority_unless_nice_is_off_and_a_measurement_never(self):
         """By 10 from where the holder started (capped at 19): a process that already held a lock is niced already."""
         path = str(self.tmp / "gpu.lock")
         base = os.nice(0)
         self.assertLess(base, 19, "this process already runs at the lowest priority: a lowered child is unobservable")
-        for nice, expected in ((True, min(base + 10, 19)), (False, base)):
-            out = subprocess.run([sys.executable, "-c", NICE_UNDER_GPU_LOCK, path], env=self.env(host={"nice": nice}),
-                                 capture_output=True, text=True, check=True, timeout=30)
-            self.assertEqual(int(out.stdout.strip().splitlines()[-1]), expected, out.stderr)
+        for mode, nice, expected in (("shared", True, min(base + 10, 19)), ("shared", False, base),
+                                     ("exclusive", True, base)):
+            out = subprocess.run([sys.executable, "-c", NICE_UNDER_GPU_LOCK, path, mode],
+                                 env=self.env(host={"nice": nice}), capture_output=True, text=True, check=True, timeout=30)
+            self.assertEqual(int(out.stdout.strip().splitlines()[-1]), expected, (mode, nice, out.stderr))
+
+
+#: holds the clock lock, announces it, and blocks on stdin until told to let go
+HOLD_CLOCK = ("import sys\n"
+              "from fsla_devtools.locks import clock\n"
+              "with clock.held():\n"
+              "    print('ACQUIRED', flush=True)\n"
+              "    sys.stdin.readline()\n")
+
+
+class ClockLock(Configured):
+    """The lock and unlock commands append a line to a ledger, so a test sees when the machine's clock was locked."""
+
+    def clock_env(self) -> tuple[dict, Path]:
+        ledger = self.tmp / "ledger"
+        append = [sys.executable, "-c", f"open({str(ledger)!r}, 'a').write(__import__('sys').argv[1] + '\\n')"]
+        env = self.env(host={"lock_dir": str(self.tmp / "locks"), "nice": False},
+                       clock={"ghz": 1.5, "lock": [*append, "lock"], "unlock": [*append, "unlock"]})
+        return env, ledger
+
+    @staticmethod
+    def lines(ledger: Path) -> list[str]:
+        return ledger.read_text().split() if ledger.exists() else []
+
+    def test_the_last_holder_out_unlocks_and_another_leaving_does_not(self):
+        env, ledger = self.clock_env()
+        first = self.spawn(HOLD_CLOCK, env)
+        self.assertEqual(self.line(first, TIMEOUT_S), "ACQUIRED\n")
+        second = self.spawn(HOLD_CLOCK, env)
+        self.assertEqual(self.line(second, TIMEOUT_S), "ACQUIRED\n")
+        self.assertEqual(self.lines(ledger), ["lock"])
+        self.release(first)
+        self.assertEqual(self.lines(ledger), ["lock"], "a holder leaving unlocked the clock under another")
+        self.release(second)
+        self.assertEqual(self.lines(ledger), ["lock", "unlock"])
+
+    def test_a_holder_that_died_is_not_counted(self):
+        env, ledger = self.clock_env()
+        dead = self.spawn(HOLD_CLOCK, env)
+        self.assertEqual(self.line(dead, TIMEOUT_S), "ACQUIRED\n")
+        dead.kill()
+        dead.wait(timeout=TIMEOUT_S)
+        alive = self.spawn(HOLD_CLOCK, env)
+        self.assertEqual(self.line(alive, TIMEOUT_S), "ACQUIRED\n")
+        self.release(alive)
+        #: the dead holder never released; the next holder counted nobody, engaged, and was the last one out
+        self.assertEqual(self.lines(ledger), ["lock", "lock", "unlock"])
+
+    def test_a_host_without_a_clock_holds_nothing(self):
+        env = self.env(host={"lock_dir": str(self.tmp / "locks"), "nice": False})
+        done = subprocess.run([sys.executable, "-c", "from fsla_devtools.locks import clock\n"
+                               "with clock.held() as cfg:\n    print(cfg)\n"], env=env, capture_output=True, text=True,
+                              timeout=TIMEOUT_S, check=True)
+        self.assertEqual(done.stdout.strip(), "None")
+        self.assertFalse((self.tmp / "locks").exists())
 
 
 class Reader(Configured):

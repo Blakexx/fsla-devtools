@@ -199,7 +199,7 @@
   "moduleExtensions": {
     "//bazel:environment.bzl%environment": {
       "general": {
-        "bzlTransitiveDigest": "7UNZMxxfRm8N9jHfEE0cOZXedwvcNELF1lSHT1OkSjo=",
+        "bzlTransitiveDigest": "lOBdYQA2zeNeYm3emc5nnpqYrtiQS8A3XwyILp9H9RM=",
         "usagesDigest": "OQ3FRo4MuQMwN/2kdexX6XnTn8cuEMfIyEgBhZNNsE4=",
         "recordedInputs": [
           "REPO_MAPPING:,uv +environment+uv"

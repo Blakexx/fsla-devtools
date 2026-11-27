@@ -30,6 +30,10 @@ unit tiers, the sanitizer) only needs the device not to be mid-measurement, and 
 neither's answer. `mode="exclusive"` (default) holds the reader/writer file exclusively, so it also excludes every
 shared holder. `mode="shared"` holds it shared plus one of `host.gpu_shared_slots` slot files, so that many correctness
 runs proceed concurrently. The gate/iteration shape of `fsla_devtools.locks.host`, applied to a fixed pool.
+
+**A MEASUREMENT RUNS AT ITS OWN PRIORITY.** A shared holder lowers its own CPU and IO priority (`host.nice`), so a
+correctness run yields to the host's other work; an exclusive holder never does: a measured process that host work can
+preempt carries that work inside its samples.
 """
 from __future__ import annotations
 
@@ -146,7 +150,8 @@ def gpu_lock(path: str | None = None, *, mode: str = "exclusive"):
                     if len(held) == 1:
                         time.sleep(0.01)
         os.environ[HELD_MARKER] = str(os.getpid())
-        host.lower_priority("gpu_lock")
+        if mode == "shared":
+            host.lower_priority("gpu_lock")
         try:
             yield
         finally:

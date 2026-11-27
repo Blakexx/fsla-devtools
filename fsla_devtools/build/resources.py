@@ -6,8 +6,9 @@ config; a claim is a count of slots or "all" (exclusive, the Bazel / Ninja / Gra
     gpu        capacity host.gpu_shared_slots; "all" is the GPU lock exclusive (a measurement), 1 a shared slot (a
                correctness run); a shared claim of more than one slot is refused
     host_cpu   capacity host.budget_slots; "all" is every slot, n waits for one and takes up to n (the host budget's draw)
-    clock      capacity 1; holding it engages the host's clock lock for this process (released at exit); the proof
-               is the reader's, against `fsla_devtools.locks.clock.within`
+    clock      capacity 1; holding it holds the machine's clock lock for the target (`fsla_devtools.locks.clock.held`:
+               engaged by its first holder, released by its last); the proof is the reader's, against
+               `fsla_devtools.locks.clock.within`
 
 The providers take the machine-wide locks, so tools and agents outside the build are excluded as well; every claim of a
 target is taken in name order and released together, and the lock-held markers go to the target's worker, so a tool the
@@ -50,8 +51,8 @@ def _host_cpu(claim) -> Iterator[None]:
 def _clock(claim) -> Iterator[None]:
     if claim not in ("all", 1):
         raise ValueError(f"the clock is held as 1, not {claim!r}")
-    clock.lock()
-    yield
+    with clock.held():
+        yield
 
 
 PROVIDERS = {"gpu": _gpu, "host_cpu": _host_cpu, "clock": _clock}

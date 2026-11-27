@@ -1,8 +1,10 @@
-"""THE TIMING SYSTEM: interleaved timing and memory, as targets of the declared build system (`fsla_devtools.build`).
+"""THE TIMING SYSTEM: interleaved timing -- as the session program a Bazel run target starts (`session`, over
+`bazel/measure.bzl`'s `timing_entry` targets) and as targets of the declared build system (`fsla_devtools.build`), both
+interleaving with one loop (`session.interleave`) -- and memory.
 
-Two layers, two vocabularies. The build system runs TARGETS; the timing system holds ENTRIES -- one checkout's timed
-callable on one central cell -- in a SERVER (a pool of workers, one per checkout environment, living in the build
-system's own worker for the run). The targets (`declare.py` builds them):
+The declared build system's form: two layers, two vocabularies. The build system runs TARGETS; the timing system holds
+ENTRIES -- one checkout's timed callable on one central cell -- in a SERVER (a pool of workers, one per checkout
+environment, living in the build system's own worker for the run). The targets (`declare.py` builds them):
 
     start_timing_server    the server, for this build
     register_timing        ONE target that registers one entry per cell it takes (it runs in the checkout's

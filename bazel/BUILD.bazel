@@ -1,11 +1,13 @@
-"""The module's Starlark: the environment extension (environment.bzl), the generic rules (rules.bzl), the results
-store's rules (results.bzl), and the data repository's BUILD file in a graph that pins it (data.BUILD)."""
+"""The module's Starlark: the environment extension (environment.bzl), the generic rules (rules.bzl), the
+measurement rules (measure.bzl), the results store's rules (results.bzl), and the data repository's BUILD file in a graph
+that pins it (data.BUILD)."""
 
 load(":workspace.bzl", "tree_part")
 
 exports_files([
     "data.BUILD",
     "environment.bzl",
+    "measure.bzl",
     "results.bzl",
     "rules.bzl",
 ])
