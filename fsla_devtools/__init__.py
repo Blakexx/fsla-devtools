@@ -9,7 +9,7 @@
   session over entries of one or several commits' bundles, its null gate, the memory pass.
 - `fsla_devtools.diff`: two diff sides over the same cells compared under one rule, the claim a gate can fail on.
 - `fsla_devtools.results`: the results store's code -- records keyed by their semantics, every sample kept, in the data
-  repository -- and its readings: the index and views, the verdict, the instruments' deltas, the dashboard.
+  repository -- and its readings: the index and views, the verdict, the dashboard.
 - `fsla_devtools.instrument`: an instrument run -- a tool over the files it reads, laid out as a tree, its JSON or its
   refusal the output.
 - `fsla_devtools.record`: the record of a build output, the program a `results_store` run target starts: each output

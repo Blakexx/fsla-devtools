@@ -10,8 +10,8 @@ two samples (a ratio, a baseline) is stored.
 
 The backend is a directory of files, `<workspace>/<package>/<target>/<run>.json` a sample, its output and the files the
 same execution wrote beside it, its PARTS, in `<run>/` beside it: by default the data repository's `records/`, at the
-checkout the dev config's `store.root` names. The readings -- the index and its views, the verdict, the instruments'
-deltas, the dashboard -- are queries over it, never stored.
+checkout the dev config's `store.root` names. The readings -- the index and its views, the verdict, the dashboard --
+are queries over it, never stored.
 """
 from .store import Store, backend, check, checkout, digest, key, label_path, labels, machine_paths, outputs, portable, run_id
 

@@ -16,7 +16,8 @@ from fsla_devtools import docrefs
 
 #: the configuration the tests run under, as a repository's `docrefs_test` hands it
 FLAGS = ["--lock", "docs/references.lock.json", "--package", "fsla=", "--package", "tools=", "--package",
-         "bench=measure", "--mirror", "docs/internals/tools/=tools/", "--exclude", "docs/LEDGER.md"]
+         "bench=measure", "--mirror", "docs/internals/tools/=tools/", "--mirror", "docs/internals/=csrc/src/",
+         "--complete", "docs/internals/", "--exclude", "docs/LEDGER.md"]
 CODE_V1 = "def f(x):\n    return x + 1\n"
 DOC = "# Page\n\nThe function adds one: `fsla/a.py`'s `f`.\n"
 
@@ -134,6 +135,20 @@ class References(Tree):
         kept = docrefs.references("docs/internals/tools/t.md", files, pinned=frozenset({"tools/t.py::gone"}))
         self.assertIn(docrefs.Target("tools/t.py", "gone"), kept)
         self.assertIsNone(self.read("tools/t.py::gone", files))
+
+    def test_every_cpp_source_has_a_page_and_a_page_names_only_live_identifiers(self):
+        files = self.plant({"csrc/src/a/k.cu": "void kern() {}\n", "csrc/src/a/k.cuh": "int live_name;\n",
+                            "csrc/src/b/m.cuh": "int other;\n", "csrc/third_party/x/y.cuh": "int z;\n",
+                            "tools/t.py": "def tool_name(): pass\n"})
+        self.assertEqual(docrefs.mirror_page("csrc/src/a/k.cuh"), "docs/internals/a/k.md")
+        self.assertEqual(docrefs.mirror_findings(files)[0].split(" has no")[0], "csrc/src/a/k.cu")
+        self.assertEqual(len(docrefs.mirror_findings(files)), 3)
+        files = self.plant({"docs/internals/a/k.md": "`kern`, `live_name`, `tool_name` live; `gone_name` is not.\n",
+                            "docs/internals/b/m.md": "<!-- ABSENT: retired_ring other -->\nIt names `retired_ring`.\n"})
+        found = docrefs.mirror_findings(files)
+        self.assertEqual(len(found), 2)
+        self.assertIn("docs/internals/a/k.md:1: names `gone_name`", found[0])
+        self.assertIn("declares `other` ABSENT, and the tree carries it", found[1])
 
     def test_an_excluded_doc_is_never_read(self):
         files = self.plant({"docs/LEDGER.md": "`fsla/gone.py` was deleted\n", "docs/p.md": "see `fsla/gone.py`\n"})

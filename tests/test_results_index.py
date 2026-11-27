@@ -20,11 +20,6 @@ def isolate_cache(case: unittest.TestCase, directory: Path) -> None:
     case.addCleanup(patcher.stop)
 
 
-#: an instrument's store target and its output's semantics (`fsla_devtools.record`'s: source, file, inputs' digests)
-SASS_LABEL = "@fsla//measure:store_sass"
-SASS = {"source": "//:sass", "file": "sass.json", "inputs": {"//:library": "d" * 64}}
-
-
 class IndexContract(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -94,14 +89,8 @@ class IndexContract(unittest.TestCase):
         with self.assertRaises(ValueError):
             index.matching("@fsla//:tool", {"cell') OR 1=1 --": "x"})
 
-    def test_instrument_metrics_is_every_number_long_and_diff_cells_is_every_verdict(self) -> None:
-        """The suite reads its own instruments through one long view: a SASS count is a row keyed by (instrument, cell,
-        metric), the instrument its store target's label; a stored diff is rows per cell and quantity with its verdict and
-        why, never its tensors."""
-        sass = self.root.parent / "sass.json"
-        sass.write_text(json.dumps({"": {"arm.cubin": {"ok": True, "functions": {"kern": {"hmma": 7, "instr": 90,
-                                                                                            "calls": 0}}}}}))
-        self.put(SASS, Store(SASS_LABEL, self.root), output_file=sass, provenance={"run": "r1"})
+    def test_diff_cells_is_every_verdict(self) -> None:
+        """A stored diff is rows per cell and quantity with its verdict and why, never its tensors."""
         self.put(
             {"diff": 1}, Store("@fsla//measure:carry_vs_oracle", self.root), provenance={"run": "r1"},
             output={"strategy": "per-slot", "expect": "same", "held": False, "compared": 1, "quantities": 2,
@@ -113,27 +102,12 @@ class IndexContract(unittest.TestCase):
                                                                   "failed": 1, "slots": 4}}},
                               "cell-b": {"status": "unusable", "produced_by": ["right"], "why": "no arm"},
                               "cell-c": {"status": "refused", "left": "RuntimeError: no arm", "right": None}}})
-        rows = self.sql("SELECT instrument, cell, metric, value FROM instrument_metrics ORDER BY metric")
-        self.assertEqual(rows, [(SASS_LABEL, None, "sass.arm.cubin.kern.calls", 0),
-                                (SASS_LABEL, None, "sass.arm.cubin.kern.hmma", 7),
-                                (SASS_LABEL, None, "sass.arm.cubin.kern.instr", 90)])
         verdicts = self.sql("SELECT cell, cell_status, why, quantity, same, quantity_why, ratio, bound_by, held "
                             "FROM diff_cells ORDER BY cell, quantity")
         self.assertEqual(verdicts, [("cell-a", "ok", None, "num", 1, None, None, None, 0),
                                     ("cell-a", "ok", None, "state", 0, "outside the allowance", 2.5, "the envelope", 0),
                                     ("cell-b", "unusable", "no arm", None, None, None, None, None, 0),
                                     ("cell-c", "refused", "RuntimeError: no arm", None, None, None, None, None, 0)])
-
-    def test_instruments_compares_one_run_to_another_by_metric(self) -> None:
-        from fsla_devtools.results.instruments import compare
-
-        for run, hmma in (("r1", 8), ("r2", 12)):
-            f = self.root.parent / f"sass-{run}.json"
-            f.write_text(json.dumps({"": {"arm.cubin": {"functions": {"kern": {"hmma": hmma, "instr": 90}}}}}))
-            self.put({**SASS, "run": run}, Store(SASS_LABEL, self.root), output_file=f, provenance={"run": run})
-        rows = compare(self.root, baseline="r1", run="r2", min_change=0.1)
-        self.assertEqual([(r["metric"], r["value"], r["reference"], round(r["change"], 3)) for r in rows],
-                         [("sass.arm.cubin.kern.hmma", 12, 8, 0.5)])
 
 
 if __name__ == "__main__":

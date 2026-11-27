@@ -217,35 +217,10 @@ class Store:
                   "provenance": {"host": platform.node(), **(provenance or {})}, **extra}
         if error is not None:
             sample["error"] = error[-4000:]
-        return self._write(semantics, run or run_id(), sample, output, output_file, parts, shutil.move)
-
-    def refile(self, semantics: dict, *, run: str, at: str, provenance: dict, mark: dict,
-               output_file: Path | str | None = None, parts: dict[str, Path | str] | None = None,
-               error: str | None = None, extra: dict | None = None) -> dict | None:
-        """A sample made from bytes kept before it, never measured here: its output and `parts` COPIED in unchanged (or,
-        for a failure kept, its `error`), `at` the date the bytes themselves state, `provenance` what they state (no host
-        is added: this machine ran nothing), `extra` the other fields they state, kept as given, and `mark` saying where
-        they were kept -- `{"backfilled": ...}` for a file kept as written, `{"migrated": ...}` for a sample of the store's
-        earlier layout -- with the machine paths what was kept carries (its bytes, and the fields it states), stated,
-        never refused, since nothing is rewritten. None when the label already holds a sample of this `run`."""
-        if (error is None) == (output_file is None):
-            raise ValueError("a re-filed sample is exactly one of output_file or error")
-        if (self.dir / f"{run}.json").exists():
-            return None
-        files = [*([output_file] if output_file is not None else []), *(parts or {}).values()]
-        found = machine_paths(mark)
-        if found:
-            raise ValueError(f"{self.label}: a mark names where bytes were kept, never a machine path: found {found}")
-        (kind, where), = mark.items()
-        kept = machine_paths([semantics, provenance, sorted(parts or {}), error, extra, *(_content(Path(f)) for f in files)])
-        sample = {"utc": at, "ok": error is None, "wall_s": None, **(extra or {}), "provenance": provenance,
-                  kind: {**where, "machine_paths": kept}}
-        if error is not None:
-            sample["error"] = error
-        return self._write(semantics, run, sample, None, output_file, parts, shutil.copyfile)
+        return self._write(semantics, run or run_id(), sample, output, output_file, parts)
 
     def _write(self, semantics: dict, run: str, sample: dict, output: object, output_file: Path | str | None,
-               parts: dict[str, Path | str] | None, bring) -> dict:
+               parts: dict[str, Path | str] | None) -> dict:
         """The sample `<run>.json`, its output and parts first in `<run>/`, each created exclusively: a run that exists
         is refused, never overwritten."""
         if not _RUN.match(run):
@@ -263,7 +238,7 @@ class Store:
             suffix = Path(output_file).suffix if output_file is not None else ".json"
             dest = folder / f"output{suffix}"
             if output_file is not None:
-                bring(str(output_file), dest)
+                shutil.move(str(output_file), dest)
             else:
                 dest.write_text(json.dumps(output, indent=1, sort_keys=True) + "\n")
             sample["output"] = f"{run}/{dest.name}"
@@ -272,7 +247,7 @@ class Store:
             for name, source in parts.items():
                 dest = folder / name
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                bring(str(source), dest)
+                shutil.move(str(source), dest)
         with open(self.dir / f"{run}.json", "x") as fh:
             fh.write(json.dumps(sample, indent=1, sort_keys=True) + "\n")
         return sample

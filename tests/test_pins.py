@@ -8,7 +8,7 @@ from pathlib import Path
 
 PINS = Path(__file__).resolve().parents[1] / "pins"
 REQUIRED = ("name", "role", "upstream", "version", "asset_sha256", "archive_root", "binary_path")
-RELEASES = ("bazelisk", "clang_tidy", "difftastic", "hyperfine", "mold", "nsight_compute", "nsight_systems", "uv")
+RELEASES = ("bazelisk", "clang_tidy", "mold", "nsight_compute", "nsight_systems", "uv")
 
 
 def pin(name: str) -> dict:

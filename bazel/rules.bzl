@@ -175,6 +175,8 @@ def _docrefs_test_impl(ctx):
         flags += ["--package", "%s=%s" % (name, directory)]
     for docs, sources in ctx.attr.mirrors.items():
         flags += ["--mirror", "%s=%s" % (docs, sources)]
+    for docs in ctx.attr.complete:
+        flags += ["--complete", docs]
     for doc in ctx.attr.exclude:
         flags += ["--exclude", doc]
     words = [shell.quote(f) for f in flags]
@@ -199,6 +201,8 @@ _docrefs_test = rule(
                                            "the directory it imports from (\"\" for the root)"),
         "mirrors": attr.string_dict(doc = "the mirror rules, in order: a doc under the key's prefix mirrors the source " +
                                           "at the value's prefix and the doc's stem"),
+        "complete": attr.string_list(doc = "mirror rules (their doc prefixes) whose C++ sources each have a page, and whose pages " +
+                                           "name only identifiers the tree carries"),
         "exclude": attr.string_list(doc = "docs never read: a ledger whose rows describe the tree at their commit"),
         "data": attr.label(allow_single_file = True, doc = "the pinned data's root file (a data repository's " +
                                                            "`:root`): `data:` citations resolve in its directory"),

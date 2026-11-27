@@ -26,7 +26,6 @@ _SAMPLES = "SELECT target, run, member, round, ms FROM timing_samples WHERE run 
 _MEMORY = "SELECT label, arm, cell, peak_bytes, peak_reserved_total_bytes FROM memory_rows WHERE run = ? AND status = 'ok'"
 _INSTRUMENTS = """SELECT label, count(DISTINCT key), max(utc) FROM samples
                   WHERE ok AND json_type(semantics, '$.inputs') = 'object' GROUP BY label ORDER BY label"""
-_METRICS = "SELECT instrument, cell, metric, value FROM instrument_metrics WHERE run = ?"
 _DIFFS = """SELECT target, run, strategy, expect, held, compared, quantities, minimum, cell, cell_status, why, quantity,
                    same, quantity_why, ratio, bound_by FROM diff_cells WHERE run = ? ORDER BY target, cell, quantity"""
 
@@ -68,10 +67,8 @@ def _ratio(candidate: dict[int, list[float]], reference: dict[int, list[float]])
 
 
 def render(root: Path | str | None = None, *, reference: str | None = None, run: str | None = None,
-           session: str | None = None, baseline: str | None = None) -> str:
+           session: str | None = None) -> str:
     runs = index.query(_RUNS, root=root)[1]
-    if not runs:
-        runs = index.query("SELECT run, max(utc) FROM instrument_metrics GROUP BY run ORDER BY max(utc) DESC", root=root)[1]
     run = run or (runs[0][0] if runs else None)
     columns, rows = index.query(_MEMBERS, (run,), root=root)
     members = [dict(zip(columns, row, strict=True)) for row in rows if session is None or row[4] == session]
@@ -113,7 +110,6 @@ def render(root: Path | str | None = None, *, reference: str | None = None, run:
                        f"<td class='num'>{_mb(allocated)}</td><td class='num'>{_mb(reserved)}</td>"
                        f"<td><code>{html.escape((m['git_sha'] or '')[:8])}</code></td></tr>")
         out.append("</table></div>")
-    out += _instrument_sections(root, run, baseline)
     out += _diff_sections(root, run)
     out.append("<h2>Instrument records</h2><div class='scroll'><table><tr><th>target</th><th>semantics</th>"
                "<th>newest sample</th></tr>")
@@ -129,42 +125,6 @@ def _fmt(value) -> str:
     if isinstance(value, float):
         return f"{value:.4g}"
     return html.escape(str(value))
-
-
-def _instrument_sections(root, run: str | None, baseline: str | None) -> list[str]:
-    """One table per instrument: every metric it recorded per cell, and beside each the relative change from the
-    baseline run where one is named -- the suite reading its own instruments."""
-    if run is None:
-        return []
-    _, rows = index.query(_METRICS, (run,), root=root)
-    by: dict[str, dict[str | None, dict[str, object]]] = {}
-    for instrument, cell, metric, value in rows:
-        by.setdefault(instrument, {}).setdefault(cell, {})[metric] = value
-    base: dict[tuple, object] = {}
-    if baseline:
-        for instrument, cell, metric, value in index.query(_METRICS, (baseline,), root=root)[1]:
-            base[(instrument, cell, metric)] = value
-    out = []
-    for instrument in sorted(by):
-        cells = by[instrument]
-        metrics = sorted({m for c in cells.values() for m in c})
-        out.append(f"<h2>{html.escape(instrument)}</h2><p class='meta'>{len(cells)} cell(s); "
-                   f"{'change baseline ' + html.escape(baseline) if baseline else 'no reference run'}</p>")
-        out.append("<div class='scroll'><table><tr><th>cell</th>" + "".join(
-            f"<th>{html.escape(m)}</th>" + ("<th>Δ</th>" if baseline else "") for m in metrics) + "</tr>")
-        for cell in sorted(cells, key=lambda c: c or ""):
-            tds = []
-            for m in metrics:
-                value = cells[cell].get(m)
-                tds.append(f"<td class='num'>{_fmt(value)}</td>")
-                if baseline:
-                    ref = base.get((instrument, cell, m))
-                    numeric = isinstance(value, (int, float)) and isinstance(ref, (int, float))
-                    change = ((value - ref) / ref if ref else None) if numeric else None
-                    tds.append(f"<td class='num'>{'' if change is None else f'{change:+.1%}'}</td>")
-            out.append(f"<tr><td>{html.escape(cell or '(binary)')}</td>{''.join(tds)}</tr>")
-        out.append("</table></div>")
-    return out
 
 
 def _diff_sections(root, run: str | None) -> list[str]:

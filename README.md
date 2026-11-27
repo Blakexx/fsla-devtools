@@ -11,7 +11,7 @@ carry it. It is a development dependency: nothing a user installs imports it.
 | `fsla_devtools.cells` | the central cell registry: every input an FSLA measurement or test runs on (carry, layer, producer, QKV), its draw, its seed and the regime it proves, named once; bases and the cells derived from them; each cell's DESCRIPTION (its record and the digest of the code that draws it), a Bazel target (`@<cells>//:<cell>`), and its fields (`@<cells>//:cells.bzl`) |
 | `fsla_devtools.timing` | the timing system: the session program a Bazel run target starts (`fsla_devtools.timing.session`: interleaved, clock-locked, stored), over entries of one or several commits' bundles; its null gate and the memory pass; the entry workers |
 | `fsla_devtools.diff` | the diff: two sides over the same cells, each produced in its own bundle (`side`), compared under one rule (bit-identity, the per-slot clause rule, support equality) by a verdict (`verdict`), with a claim a gate can fail on -- a difference expected or refused |
-| `fsla_devtools.results` | the results store's code: one file a sample under its producing target's label, every sample kept, in the data repository (fsla-results); its index and views, the verdict (whether a candidate's timing is a regression against a reference timed in the same sessions), the instruments' deltas and the dashboard |
+| `fsla_devtools.results` | the results store's code: one file a sample under its producing target's label, every sample kept, in the data repository (fsla-results); its index and views, the verdict (whether a candidate's timing is a regression against a reference timed in the same sessions) and the dashboard |
 | `fsla_devtools.instrument` | an instrument run: a tool over the files it reads, laid out as a tree of copies, its JSON (or its refusal) the output; what the `instrument` rule's action runs, and a store target's run for an instrument on the device |
 | `fsla_devtools.record` | the record of a build output: the program a `results_store` run target starts, storing each output file unless its record already holds it |
 | `fsla_devtools.process` | `subprocess.run` for a command that starts processes of its own: a timeout or an interrupt stops the whole tree |
@@ -66,6 +66,11 @@ one never read, one that resolves to nothing, and a pin no doc makes any more. E
 the target, and the run ends with the one command that re-pins once the sentence has been read against the target. The
 lock records the interpreter's version, since `ast.unparse` moves between versions; a run under another is refused.
 
+**The mirror's shape** is checked beside the pins, under the `mirrors` rules named `complete`: every C++ source under a rule's sources has
+its page (a `.cu` and its `.cuh` share one, the page at their stem), and a page names in code font only identifiers its
+sources or the tree carry; a name the tree carries nowhere is a finding, and `<!-- ABSENT: name -->` declares a name that
+is gone (and fails once the tree carries it again).
+
 ```bash
 bazel test //:docrefs                        # the gate
 bazel run //:docrefs -- pending              # each pending target, its citing docs, and its change since the pin
@@ -83,6 +88,7 @@ A repository turns it on with a `docrefs_test` (`bazel/rules.bzl`), whose attrib
 | `lock` | the lock's path in the checkout |
 | `packages` | the package roots a dotted name resolves under, each to the directory it imports from (`""` for the root) |
 | `mirrors` | MIRROR RULES, in order: a doc under the key's prefix describes the source at the value's prefix and the doc's stem (`docs/internals/` -> `csrc/src/`: `docs/internals/a/b.md` mirrors `csrc/src/a/b.cu`), and on it a bare name in code font cites that source's primitive |
+| `complete` | the mirror rules (their doc prefixes) that are exhaustive: every C++ source under their sources has a page, and their pages name only identifiers the tree carries |
 | `exclude` | docs never read: a ledger whose rows describe the tree at their commit |
 | `data` | the pinned data's `:root` (the environment extension's `data` tag): a citation of the pinned data resolves in it |
 | `python` | the interpreter: an environment's `:python`, or an executable that runs one |
@@ -283,16 +289,9 @@ every sample to its label, its run, its format and a key that recomputes, every 
 every failure to its error, refuses a lock or a write in progress and a target's folder under another's, and reads no
 sample's output, since a stored sample is never rewritten.
 
-**A RE-FILED SAMPLE** is bytes kept before the store held them, written as a sample of the label that produces them
-(`Store.refile`, and `refile`, `fsla_devtools/results/refile.py`, over a plan of many): a file a data repository kept as
-written (`backfilled`), or a sample of the store's earlier layout (`migrated`). Its bytes are copied in unchanged as
-the output and the files they belong with as its parts, its `utc` the date they state, its provenance what they state
-(no host: the machine that re-files ran nothing), and the sample marked with where they were kept and the data
-repository's commit, and the machine paths the bytes carry, stated, never refused, since nothing is rewritten. A reader
-tells a re-filed sample from one the store wrote at run time by that mark. The plan is written by whoever knows what
-the files mean -- the store knows nothing of a tool's files: each sample's label, run, semantics, date, provenance,
-mark, output and parts. A run the label already holds is written again by nothing, and the re-filing writes a table, a
-line a file: its sha256 and the stored file's, `identical` only where they are equal; it fails when any is not.
+A sample carrying a `backfilled` or `migrated` mark was filed from bytes kept before the store held them (a file a data
+repository kept as written, or a sample of the store's earlier layout): its bytes are its output unchanged, its `utc` the
+date they state, its provenance what they state (no host), and the mark says where they were kept.
 
 **The index** (`fsla_devtools.results.index`) is the samples as one SQLite database, derived: `samples(label, run, key,
 ok, utc, wall_s, semantics, provenance, error, output_path, output, extra)`, a row a sample, the JSON fields read with SQLite's JSON functions, and a tool's shape a view in `fsla_devtools/results/views/`, created after
@@ -305,20 +304,17 @@ repository's own index is a build output (`results_index`, `bazel/results.bzl`),
 | `timing_members` | every session's samples (an output with `members` and `samples`, at its session's label) | member of a stored session: the run, the session, its entry (`owner`, a label; a registration in an older sample), the label and arm read from it, the cell, the LEVEL it prices (`kernel`, `op`, `layer`), whether it ran and why not, device, torch, the owner's commit and diff, the session's rounds, reps and clock reads |
 | `timing_samples` | `timing_members` | timed call, in the order taken: its member's label, arm and cell, its round, rep and position in the rep's random order, and its milliseconds |
 | `memory_rows` | every memory pass (`measure_memory`, at its label) | timing entry alone on a central cell: peak allocated and reserved bytes, what was allocated before the build and after the calls, bytes held outside the caching allocator and the totals with them, label, arm, commit |
-| `instrument_metrics` | every build output's record (semantics with `inputs`) | every NUMBER a declared instrument recorded, one row each, in long form: the run, the cell (NULL for the whole-binary `sass`), a dotted `metric` (`sass.<cubin>.<function>.<count>`) and its value |
 | `diff_cells` | every diff's samples (an output with `cells`, at its target's label) | cell and quantity of a stored diff: the claim and whether it `held`, the cell's status (`ok`, `unusable`, `refused`) and why, and the quantity's verdict with why it differs and its worst slot |
 | `null_gates` | every null gate (`interleaved_timing(null_gate = True)`, at its label) | entry on a cell of a null gate: the run, its owner, label and arm, whether its two workers agree, the ratio's median and quartiles, its commit |
 | `cells` | fleet and local grids | stored grid cell: bench, config, cell, image or local checkouts, row |
 
 ```bash
 python -m fsla_devtools.results [--root RECORDS] check   # the default root: store.root's records/
-python -m fsla_devtools.results --root RECORDS refile --plan PLAN --from CHECKOUT --table TABLE
 python -m fsla_devtools.results show [LABEL]
 python -m fsla_devtools.results index [--db FILE]
 python -m fsla_devtools.results sql "SELECT ..."
 python -m fsla_devtools.results history|latest LABEL [--where PATH=VALUE]
 python -m fsla_devtools.results verdict --reference LABEL [--candidate LABEL] [--cell C] [--arm A]
-python -m fsla_devtools.results instruments --baseline RUN [--run RUN]
 python -m fsla_devtools.results dashboard --out suite.html [--reference LABEL] [--run RUN]
 ```
 
@@ -468,7 +464,6 @@ this module for `rctx.which("<tool>")` and `rctx.execute(["<tool>", ...])`, each
 | `bazelisk_pin.json` | Bazel's launcher, the one tool a workspace bootstraps outside its graph |
 | `mold_pin.json` | the linker a workspace's graph links with (`@mold`, a `pinned` tag) |
 | `clang_tidy_pin.json` | the analyzer of a workspace's unit lints (`@clang_tidy`, a `pinned` tag): LLVM's clang-tidy as a wheel, its binary's digest checked |
-| `hyperfine_pin.json`, `difftastic_pin.json` | the benchmarking tool and the structural diff (`difft`) a developer's box installs |
 | `bazel_version` | the Bazel release the pins are tested with |
 
 Each workspace keeps its own `.bazelversion`; `bazel_version_test(name, version = ".bazelversion")` (`bazel/rules.bzl`) fails

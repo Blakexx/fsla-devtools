@@ -11,7 +11,8 @@
 
 A repository runs it through its `docrefs_test` target (`bazel/rules.bzl`), whose attributes are the repository's
 configuration, handed here as flags: the lock (`--lock`), the package roots a dotted name resolves under (`--package
-NAME=DIR`), the mirror rules (`--mirror DOCS=SOURCES`), the docs never read (`--exclude`), the pinned data (`--data`)
+NAME=DIR`), the mirror rules (`--mirror DOCS=SOURCES`), those that are exhaustive (`--complete DOCS`), the docs never read
+(`--exclude`), the pinned data (`--data`)
 and the target's own label (`--label`). It runs in the checkout, on the standard library only.
 
 A REFERENCE is a doc's citation of a primitive: `` `tools/ratify.py`'s `main` ``, a dotted name in code font whose
@@ -28,6 +29,11 @@ target vanished. THE GATE FAILS ON ANY REFERENCE NOT CLEAN (a commit that change
 those references in the same commit): one the lock does not hold, one pending, one unread, one that resolves to
 nothing, and a pin whose reference no doc makes any more (`prune`). Its message names each citing doc:line and target
 and the one command that re-pins after the sentence was read against the target.
+
+THE MIRROR'S SHAPE is checked beside the pins, under the mirror rules named complete: every C++ source under a rule's
+sources has its
+page (a `.cu` and its `.cuh` share one), and a page names in code font only identifiers its sources or the tree carry
+(`<!-- ABSENT: name -->` declares a name that is gone, and fails once the tree carries it again).
 Docs: fsla-devtools' README.md#the-doc-references.
 """
 from __future__ import annotations
@@ -69,6 +75,8 @@ class Repo:
     #: MIRROR RULES: a doc under the key's prefix mirrors the source at the value's prefix and the same relative stem
     #: (`docs/internals/` -> `csrc/src/`: `docs/internals/a/b.md` mirrors `csrc/src/a/b.cu`), in order
     mirrors: dict[str, str] = field(default_factory=dict)
+    #: the mirror rules (by their doc prefixes) that are exhaustive: every C++ source under theirs has a page
+    complete: tuple[str, ...] = ()
     #: docs never read: a ledger whose rows describe the tree AT THEIR COMMIT, never re-pinned to a later tree
     exclude: tuple[str, ...] = ()
     data: Path | None = None  #: the pinned data's root directory
@@ -413,6 +421,112 @@ def change(target: Target, pinned_at: str, files: set[str]) -> str:
                                         f"{target} (working tree)"))
 
 
+# ------------------------------------------------------------------------------------------------ the mirror's shape
+
+#: the files whose text names what a mirror page may name: a C++ source, a Python or shell script, a Bazel file
+IDENTIFIER_SUFFIXES = (*CPP_SUFFIXES, ".py", ".sh", ".bzl", ".bazel")
+
+#: AN IDENTIFIER, as a mirror page writes one in code font: a C++ or Python name, with optional `::`/`.` qualification
+#: and an optional call's parentheses. A page's other backticked spans -- a path, a flag, a number, a phrase, a type
+#: expression -- are not identifiers and are not checked: what is read is the set of names a reader would go looking for
+#: in the source.
+MIRROR_IDENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:(?:::|\.)[A-Za-z_][A-Za-z0-9_]*)*(?:\(\))?$")
+
+#: NOT AN IDENTIFIER OF THE REPOSITORY, by its SHAPE: a CUDA runtime call, a PTX or intrinsic name, an architecture, or a
+#: math symbol with a subscript (`z_k`, `tau_m`, `R_0`) -- the vocabulary a page writes in code font while describing what
+#: the code does. Structural forms, never a list of sites: none says a particular page may be stale.
+MIRROR_FOREIGN = re.compile(r"^(cuda[A-Z]\w*|CU\w+|__\w+|sm_\d+|tcgen05\w*|wgmma\w*|cp_async\w*"
+                            r"|\w*__\w+\.\w+|[A-Za-z]{1,4}_[A-Za-z0-9]{1,3})$")
+
+#: language and library vocabulary a page writes in code font while describing what the code does
+MIRROR_NOT_OURS = frozenset((
+    "int", "float", "double", "bool", "void", "char", "unsigned", "long", "short",
+    "size_t", "uint8_t", "uint16_t", "uint32_t", "uint64_t", "int8_t", "int16_t",
+    "int32_t", "int64_t", "nullptr", "true", "false", "const", "constexpr", "static",
+    "inline", "template", "typename", "class", "struct", "enum", "union", "namespace",
+    "using", "return", "if", "else", "for", "while", "do", "switch", "case", "default",
+    "break", "continue", "new", "delete", "this", "auto", "public", "private", "protected",
+    "__global__", "__device__", "__host__", "__shared__", "__restrict__", "__syncthreads",
+    "__syncwarp", "__ldg", "__trap", "threadIdx", "blockIdx", "blockDim", "gridDim",
+    "warpSize", "torch", "tensor", "Tensor", "None", "True", "False", "self", "def",
+    "import", "from", "lambda", "dict", "list", "tuple", "set", "str", "bytes", "float32",
+    "float64", "bfloat16", "int32", "uint8", "cuda", "cpu", "num_warps", "num_stages",
+    "static_for", "BOOL_SWITCH", "math_pipe_throttle", "long_scoreboard", "_RS", "_SS",
+    "ldmatrix", "stmatrix", "mma", "wgmma"))
+
+#: A DECLARED ABSENCE: `<!-- ABSENT: name other_name -->`. A page may name what is GONE -- an entry that was unbound, a
+#: mechanism that retired -- and the absence is often the fact worth keeping. The names are declared on one line beside
+#: the prose that explains them, and the declaration is checked in BOTH directions: a declared-absent name the tree
+#: DOES carry is a finding too, since the passage then tells a reader the opposite of the truth.
+MIRROR_ABSENT = re.compile(r"<!--\s*ABSENT:\s*([^>]*?)\s*-->")
+
+
+def _is_cpp(path: str) -> bool:
+    return path.endswith(CPP_SUFFIXES) and "third_party" not in path.split("/")
+
+
+def mirror_page(source: str) -> str | None:
+    """The page a C++ source's reasons live on: the first COMPLETE mirror rule whose source prefix holds it gives its doc
+    prefix and the source's stem (`csrc/src/a/b.cu` and `csrc/src/a/b.cuh` -> `docs/internals/a/b.md`, one page for both)."""
+    for prefix, root in REPO.mirrors.items():
+        if prefix in REPO.complete and source.startswith(root):
+            return f"{prefix}{source[len(root):].rsplit('.', 1)[0]}.md"
+    return None
+
+
+def _identifier_text(files: set[str]) -> str:
+    """Every name the tree carries, as one blob: its code files' text and their stems (a lab experiment is named by its
+    source's stem). A page legitimately names identifiers that live in OTHER files -- the tool that writes its input, the
+    lint that enforces its law; what no page may name is an identifier that exists NOWHERE."""
+    code = sorted(f for f in files if f.endswith(IDENTIFIER_SUFFIXES) and "third_party" not in f.split("/"))
+    return "\n".join([_text(REPO.root, None, f) or "" for f in code] + [Path(f).stem for f in code])
+
+
+def mirror_findings(files: set[str]) -> list[str]:
+    """RULE 1: every C++ source has its mirror page. RULE 2: a mirror page names in code font only identifiers its
+    sources, or the tree, carry -- a name the tree contains NOWHERE is a finding, and a name it contains is accepted
+    wherever it appears. That cannot catch a page describing a live name's dead BEHAVIOUR; it catches every name that left
+    with its mechanism, the failure that was actually paid for."""
+    findings, pages = [], {}
+    for source in sorted(f for f in files if _is_cpp(f)):
+        page = mirror_page(source)
+        if page is None:
+            continue
+        pages.setdefault(page, []).append(source)
+        if page not in files:
+            findings.append(f"{source} has no mirror page: expected {page}. Every C++ source carries its reasons on the "
+                            "page at its stem under its mirror rule's docs (a .cu and its .cuh share one).")
+    blob = None
+    for page, sources in sorted(pages.items()):
+        if page not in files or page in REPO.exclude:
+            continue
+        blob = blob if blob is not None else _identifier_text(files)
+        text = "\n".join(_text(REPO.root, None, source) or "" for source in sources)
+        body = (REPO.root / page).read_text()
+        absent = {name for line in MIRROR_ABSENT.findall(body) for name in line.split()}
+        for name in sorted(absent):
+            if re.search(rf"\b{re.escape(name)}\b", blob):
+                findings.append(f"{page}: declares `{name}` ABSENT, and the tree carries it. The passage tells a reader "
+                                "the opposite of the truth: drop the name from the declaration, or say what it is now.")
+        seen: set[str] = set()
+        for lineno, line in enumerate(body.splitlines(), 1):
+            if line.lstrip().startswith(("```", "    ")):
+                continue
+            for span in CODE.findall(line):
+                match = MIRROR_IDENT.match(span)
+                name = match.group(1) if match else ""
+                if (not match or name in MIRROR_NOT_OURS or name in seen or len(name) < 3 or name in absent
+                        or MIRROR_FOREIGN.match(span) or MIRROR_FOREIGN.match(name)
+                        or re.search(rf"\b{re.escape(name)}\b", text) or re.search(rf"\b{re.escape(name)}\b", blob)):
+                    continue
+                seen.add(name)
+                findings.append(f"{page}:{lineno}: names `{span}` in code font, and {', '.join(sources)} contains no "
+                                f"`{name}`, nor does the tree. A mirror page that outlives its mechanism is a page a reader "
+                                "trusts and the code no longer honours: delete the passage, say in prose that the mechanism "
+                                f"is gone, or declare the name `<!-- ABSENT: {name} -->`.")
+    return findings
+
+
 # ------------------------------------------------------------------------------------------------ the lock
 
 #: the interpreter the digests are taken under: `ast.unparse`'s output moves between Python versions, so a pin read under
@@ -531,6 +645,9 @@ def configure(argv: list[str]) -> argparse.Namespace:
                                                                     "imports from (empty for the root)")
     ap.add_argument("--mirror", action="append", default=[], help="DOCS=SOURCES: a doc under DOCS mirrors the source "
                                                                   "under SOURCES at its stem")
+    ap.add_argument("--complete", action="append", default=[], help="a mirror rule's DOCS that is exhaustive: every C++ "
+                                                                    "source under its SOURCES has a page, and a page "
+                                                                    "names only live identifiers")
     ap.add_argument("--exclude", action="append", default=[], help="a doc never read (a ledger of past trees)")
     ap.add_argument("--data", type=Path, help="the pinned data's root file: `data:` citations resolve in its directory")
     ap.add_argument("--label", default="//:docrefs", help="the target the messages name")
@@ -539,7 +656,7 @@ def configure(argv: list[str]) -> argparse.Namespace:
     if root.returncode:
         raise SystemExit("docrefs runs inside the repository's checkout")
     REPO = Repo(root=Path(root.stdout.strip()), lock=a.lock, packages=_pairs(a.package, "--package"),
-                mirrors=_pairs(a.mirror, "--mirror"), exclude=tuple(a.exclude),
+                mirrors=_pairs(a.mirror, "--mirror"), complete=tuple(a.complete), exclude=tuple(a.exclude),
                 data=a.data.parent if a.data else None, label=a.label)
     return a
 
@@ -638,9 +755,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"after reading each reference of the whole doc: {run} accept --whole " + " ".join(whole))
     if pending or new or unread or broken:
         print(f"then stage `{REPO.lock}` (it moves with the docs).")
-    failed = bool(new or stale or broken or unread or pending)
+    shape = mirror_findings(files)
+    print("\n".join(shape))
+    failed = bool(new or stale or broken or unread or pending or shape)
     print(f"docrefs: {'FAIL' if failed else 'OK'} -- {len(found)} reference(s), {len(pending)} pending, {len(unread)} unread, "
-          f"{len(broken)} broken")
+          f"{len(broken)} broken, {len(shape)} mirror finding(s)")
     return 1 if failed else 0
 
 

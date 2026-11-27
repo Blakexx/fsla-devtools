@@ -2,8 +2,7 @@
 sample named by its run and written once (no lock, no rewrite), its semantics and their key in it, an output file
 moved in with the parts its execution wrote, a checkout's identity or a failure to read it, a timing refused without a
 commit, no machine path in anything written -- a path in someone's home directory, refused at the door, while a system
-path is kept and a stored sample is checked for its consistency alone -- and kept bytes re-filed byte-identical, their
-own date and provenance, their machine paths stated. `python -m unittest tests.test_results_store`"""
+path is kept and a stored sample is checked for its consistency alone. `python -m unittest tests.test_results_store`"""
 from __future__ import annotations
 
 import json
@@ -14,8 +13,7 @@ import unittest
 from pathlib import Path
 
 from fsla_devtools import config
-from fsla_devtools.results import Store, backend, check, checkout, digest, key, label_path, labels, outputs, portable
-from fsla_devtools.results.refile import refile
+from fsla_devtools.results import Store, backend, check, checkout, key, label_path, labels, outputs, portable
 
 #: a home-directory prefix, joined so this file carries none
 HOME = "/".join(("", "home", "someone"))
@@ -224,61 +222,6 @@ class StoreContract(unittest.TestCase):
             self.put({"cell": "u"}, output={"a": 1}, parts={"trace/row0.json": row})
         with self.assertRaisesRegex(ValueError, "no parts"):
             self.put({"cell": "u"}, error="boom", parts={"trace/row0.json": row})
-
-    def kept(self) -> Path:
-        """A data repository's directory of files kept as written: a result, its trace and a dump naming a box's path."""
-        lab = self.root / "checkout" / "lab" / "add_rate"
-        (lab / "sm_90a.trace").mkdir(parents=True)
-        (lab / "sm_90a.json").write_text('{"date": "2026-11-15T22:32:32+00:00",  "rows": [1, 2]}\n')
-        (lab / "sm_90a.trace" / "row0.json").write_text('{"stamps":[]}\n')
-        (lab / "ledger.csv").write_text(f"==PROF== Connected to process 1 ({BOX}/add_rate)\na,b\n1,2\n")
-        return self.root / "checkout"
-
-    def test_kept_bytes_are_refiled_as_a_sample_of_their_own_bytes_date_and_provenance(self) -> None:
-        """Their bytes copied in unchanged, their parts beside them, their date the sample's, no host added, marked with
-        where they were kept and the machine paths they carry; the same run refiled again writes nothing."""
-        checkout, records = self.kept(), self.root / "records"
-        lab = Store("@fsla//measure/lab:add_rate.run", records)
-        sem = {"experiment": "add_rate", "arch": "sm_90a"}
-        mark = {"backfilled": {"file": "lab/add_rate/sm_90a.json", "commit": "c" * 40}}
-        args = {"at": "2026-11-15T22:32:32Z", "provenance": {"device": "H100"}}
-        sample = lab.refile(sem, run="20261115T223232Z-backfill", mark=mark,
-                            output_file=checkout / "lab/add_rate/sm_90a.json",
-                            parts={"trace/row0.json": checkout / "lab/add_rate/sm_90a.trace/row0.json"}, **args)
-        self.assertEqual((sample["utc"], sample["provenance"]), ("2026-11-15T22:32:32Z", {"device": "H100"}))
-        self.assertEqual(sample["backfilled"], {"file": "lab/add_rate/sm_90a.json", "commit": "c" * 40, "machine_paths": []})
-        self.assertEqual(digest(lab.output(sample)), digest(checkout / "lab/add_rate/sm_90a.json"))
-        self.assertTrue((checkout / "lab/add_rate/sm_90a.json").exists())
-        self.assertIsNone(lab.refile(sem, run="20261115T223232Z-backfill", mark=mark,
-                                     output_file=checkout / "lab/add_rate/sm_90a.json", **args))
-        dump = lab.refile({**sem, "kind": "ledger"}, run="20261116T000000Z-backfill", output_file=checkout /
-                          "lab/add_rate/ledger.csv", mark={"migrated": {"from": "x/1.json", "commit": "c" * 40}}, **args)
-        self.assertEqual(dump["migrated"]["machine_paths"], [f"{BOX}/add_rate"])
-        self.assertEqual(check(records), [])
-        stated = lab.refile(sem, run="20261117T000000Z-backfill", output_file=checkout / "lab/add_rate/sm_90a.json",
-                            mark=mark, at=args["at"], provenance={"venv": f"{HOME}/venv"})
-        self.assertEqual(stated["backfilled"]["machine_paths"], [f"{HOME}/venv"])
-        with self.assertRaisesRegex(ValueError, "never a machine path"):
-            lab.refile(sem, run="20261118T000000Z-backfill", output_file=checkout / "lab/add_rate/ledger.csv",
-                       mark={"backfilled": {"file": f"{HOME}/x", "commit": "c"}}, **args)
-
-    def test_the_refiling_writes_a_plan_and_tables_every_file(self) -> None:
-        checkout, records = self.kept(), self.root / "records"
-        mark = {"backfilled": {"file": "lab/add_rate", "commit": "c" * 40}}
-        plan = {"samples": [
-            {"output": "lab/add_rate/ledger.csv", "label": "@fsla//tools:lab", "semantics": {"e": "add_rate"},
-             "run": "20261116T000000Z-a", "at": "2026-11-16T00:00:00Z", "provenance": {}, "mark": mark},
-            {"output": "lab/add_rate/sm_90a.json", "label": "@fsla//tools:lab", "semantics": {"e": "add_rate"},
-             "run": "20261115T223232Z-a", "at": "2026-11-15T22:32:32Z", "provenance": {}, "mark": mark,
-             "parts": {"trace/row0.json": "lab/add_rate/sm_90a.trace/row0.json"}}]}
-        rows = refile(plan, checkout, records)
-        self.assertEqual([(r["file"], r["run"], r["identical"]) for r in rows],
-                         [("lab/add_rate/sm_90a.json", "20261115T223232Z-a", "yes"),
-                          ("lab/add_rate/sm_90a.trace/row0.json", "20261115T223232Z-a", "yes"),
-                          ("lab/add_rate/ledger.csv", "20261116T000000Z-a", "yes")])
-        self.assertEqual(rows, refile(plan, checkout, records))
-        self.assertEqual([s["run"] for s in Store("@fsla//tools:lab", records).samples(key({"e": "add_rate"}))],
-                         ["20261116T000000Z-a", "20261115T223232Z-a"])
 
     def test_portable_makes_checkout_paths_relative_and_other_home_paths_tilde(self) -> None:
         home, root, other = Path.home(), self.root / "bench", self.root / "fsla"

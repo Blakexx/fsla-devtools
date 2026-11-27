@@ -1,6 +1,5 @@
-"""python -m fsla_devtools.results [--root RECORDS] check | refile --plan PLAN --from CHECKOUT --table TABLE |
-show [LABEL] | commit -m MESSAGE | index [--db FILE] | sql QUERY | history|latest LABEL | verdict |
-instruments --baseline RUN | dashboard --out FILE"""
+"""python -m fsla_devtools.results [--root RECORDS] check | show [LABEL] | commit -m MESSAGE |
+index [--db FILE] | sql QUERY | history|latest LABEL | verdict | dashboard --out FILE"""
 from __future__ import annotations
 
 import argparse
@@ -24,11 +23,6 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check", help="every sample well-formed under its label's folder, its key recomputing, its output and "
                                  "parts present, no lock file")
-    filled = sub.add_parser("refile", help="kept bytes made samples of the labels that produce them, byte-identical "
-                                           "(refile.py)")
-    filled.add_argument("--plan", type=Path, required=True, help="what each file is: its record, date and provenance")
-    filled.add_argument("--from", dest="checkout", type=Path, required=True, help="the checkout the plan's files are in")
-    filled.add_argument("--table", type=Path, required=True, help="the table written: each file and what it became")
     show = sub.add_parser("show", help="the labels, or one label's samples")
     show.add_argument("label", nargs="?")
     commit = sub.add_parser("commit", help="commit the records in the backend's git repository")
@@ -48,13 +42,6 @@ def main() -> int:
     dashboard.add_argument("--reference", help="the label each member's paired ratio is taken to")
     dashboard.add_argument("--run", help="the run to show (default: the newest)")
     dashboard.add_argument("--session", help="one session only")
-    dashboard.add_argument("--baseline", help="a reference run: each instrument metric's change against it")
-    instruments = sub.add_parser("instruments", help="one run's instrument numbers beside a reference run's, as deltas")
-    instruments.add_argument("--baseline", required=True, help="the reference run id")
-    instruments.add_argument("--run", help="the run to read (default: the newest with instrument records)")
-    instruments.add_argument("--instrument", help="one instrument only (sass)")
-    instruments.add_argument("--min-change", type=float, default=0.0, help="drop rows whose relative change is below")
-    instruments.add_argument("--json", action="store_true", help="one JSON object per row")
     verdict = sub.add_parser("verdict", help="each candidate judged against a reference timed in the same sessions")
     verdict.add_argument("--reference", required=True, help="the label every other label is judged against")
     verdict.add_argument("--candidate", help="one candidate label only")
@@ -65,22 +52,10 @@ def main() -> int:
 
     root = backend(a.root)
 
-    if a.cmd == "refile":
-        from .refile import run
-
-        return run(a.plan, a.checkout, root, a.table)
-
     if a.cmd == "dashboard":
         from .dashboard import write
 
-        print(json.dumps(write(a.out, root, reference=a.reference, run=a.run, session=a.session, baseline=a.baseline)))
-        return 0
-
-    if a.cmd == "instruments":
-        from .instruments import compare, table
-
-        rows = compare(root, baseline=a.baseline, run=a.run, instrument=a.instrument, min_change=a.min_change)
-        print("\n".join(json.dumps(r) for r in rows) if a.json else table(rows))
+        print(json.dumps(write(a.out, root, reference=a.reference, run=a.run, session=a.session)))
         return 0
 
     if a.cmd == "verdict":
