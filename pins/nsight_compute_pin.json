@@ -1,0 +1,14 @@
+{
+    "name": "nsight_compute",
+    "role": "the kernel profiler (`ncu`) every FSLA workspace profiles with: NVIDIA's redistributable component at the toolkit's manifest, by its digest, as compute-sanitizer is. A workspace's graph fetches it by this digest (the `pinned` tag), and a developer's box installs it under the machine's tools directory.",
+    "upstream": "https://developer.download.nvidia.com/compute/cuda/redist/redistrib_13.5.0.json",
+    "manifest": "redistrib_13.5.0.json (the toolkit pin's manifest, cuda_toolkit_pin.json beside this file, by its digest)",
+    "version": "2026.4.0.10",
+    "command": "ncu",
+    "release_asset": "nsight_compute-linux-x86_64-2026.4.0.10-archive.tar.xz",
+    "release_url": "https://developer.download.nvidia.com/compute/cuda/redist/nsight_compute/linux-x86_64/nsight_compute-linux-x86_64-2026.4.0.10-archive.tar.xz",
+    "asset_sha256": "927ad81784fc73ff266f6b910995369637a795aad4e3e9312941239b37c9caa7",
+    "archive_root": "nsight_compute-linux-x86_64-2026.4.0.10-archive",
+    "binary_path": "ncu",
+    "version_string": "Version 2026.4.0.0 (build 39012641) (public-release)"
+}

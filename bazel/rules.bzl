@@ -1,6 +1,7 @@
 """THE GRAPH'S GENERIC RULES, every FSLA repository's: a check over the tree's tracked files (`tree_test`), a check of the
 commit (`checkout_test`), a tree tool as a test (`tool_test`) or as a run target (`tool_run`), a package's part of the
-tree (`tree_part`), and the pytest tiers (`pytest_tier`, `device_lane`). A workspace's environment is its own (the
+tree (`tree_part`), the pytest tiers (`pytest_tier`, `device_lane`) and the check of a workspace's Bazel release
+(`bazel_version_test`). A workspace's environment is its own (the
 environment extension's `python` tag), so each rule takes it as an argument: `venv`, the environment's store path from
 its `flags.bzl`, and `python`, its interpreter's label. A workspace wraps these once with its own environment.
 """
@@ -282,3 +283,35 @@ def device_lane(name, cmd, devices, tags = [], **kwargs):
     """A device lane: a command over the tree on the machine's device, as a device tier runs (alone, outside the sandbox,
     keyed on the devices), never part of a suite a commit runs (`manual`)."""
     _tier_test(name = name, cmd = cmd, devices = devices, tags = tags + ["no-sandbox", "exclusive", "manual"], **kwargs)
+
+_BAZEL_VERSION_TEST = """\
+#!/bin/bash
+# a workspace's .bazelversion is the Bazel release the shared pins are tested with (fsla_devtools' bazel_version_test)
+set -euo pipefail
+own="$(cat {own})"
+tested="$(cat {tested})"
+if [ "$own" != "$tested" ]; then
+    echo "{label}: .bazelversion names Bazel $own; the shared pins (fsla-devtools' pins/) are tested with Bazel $tested -- set .bazelversion to $tested (and .bazeliskrc's digest to its release's), or move the pins' tested release first" >&2
+    exit 1
+fi
+"""
+
+def _bazel_version_test_impl(ctx):
+    script = ctx.actions.declare_file(ctx.label.name + ".sh")
+    ctx.actions.write(script, _BAZEL_VERSION_TEST.format(
+        own = shell.quote(ctx.file.version.short_path),
+        tested = shell.quote(ctx.file.tested.short_path),
+        label = ctx.label,
+    ), is_executable = True)
+    return [DefaultInfo(executable = script, runfiles = ctx.runfiles(files = [ctx.file.version, ctx.file.tested]))]
+
+bazel_version_test = rule(
+    implementation = _bazel_version_test_impl,
+    test = True,
+    attrs = {
+        "version": attr.label(mandatory = True, allow_single_file = True, doc = "the workspace's own .bazelversion"),
+        "tested": attr.label(default = Label("//pins:bazel_version"), allow_single_file = True,
+                             doc = "the Bazel release the shared pins are tested with: fsla-devtools' `pins/bazel_version`"),
+    },
+    doc = "A workspace's .bazelversion equals the Bazel release the shared pins are tested with. Each repository keeps its own file.",
+)

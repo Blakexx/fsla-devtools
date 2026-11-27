@@ -1,7 +1,19 @@
-"""The pins every FSLA workspace shares: uv and the Python it installs (an environment's `uv_pin`)."""
+"""The pins every FSLA workspace shares: uv and the Python it installs (an environment's `uv_pin`), the CUDA toolkit
+(`cuda_toolkit_pin`), Nsight Compute, bazelisk, and the Bazel release they are tested with (`bazel_version`). This package
+loads nothing of this repository's own graph, so a workspace's targets can depend on its files (a test reading a pin, the
+Bazel release check)."""
 
-load("//bazel:workspace.bzl", "tree_part")
+exports_files([
+    "bazel_version",
+    "bazelisk_pin.json",
+    "cuda_toolkit_pin.json",
+    "nsight_compute_pin.json",
+    "uv_pin.json",
+])
 
-exports_files(["uv_pin.json"])
-
-tree_part()
+#: this package's part of the tree (`tree_part`'s `tracked`, as a glob: that macro needs this repository's own graph)
+filegroup(
+    name = "tracked",
+    srcs = glob(["*"], exclude = ["BUILD.bazel"]) + ["BUILD.bazel"],
+    visibility = ["//visibility:public"],
+)

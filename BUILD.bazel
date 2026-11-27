@@ -1,6 +1,7 @@
 """fsla-devtools' root package: the files the module's environment extension reads of this checkout (the Python
 package's project file and the files its install reads), and this workspace's own checks and gate."""
 
+load("//bazel:rules.bzl", "bazel_version_test")
 load("//bazel:workspace.bzl", "tree_part", "tree_test")
 
 exports_files([
@@ -21,6 +22,14 @@ filegroup(
         "//pins:tracked",
         "//fsla_devtools/graph:tracked",
     ],
+)
+
+#: this workspace's Bazel release is the one the shared pins are tested with (`pins/bazel_version`, which a workspace's own
+#: `bazel_version_test` of its gate holds its `.bazelversion` to)
+bazel_version_test(
+    name = "bazelversion",
+    size = "small",
+    version = ".bazelversion",
 )
 
 tree_test(
@@ -58,6 +67,7 @@ tree_test(
 test_suite(
     name = "gate",
     tests = [
+        ":bazelversion",
         ":declarations",
         ":ruff",
         ":ruff_e3",

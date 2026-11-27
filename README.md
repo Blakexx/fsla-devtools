@@ -305,7 +305,7 @@ runs, and holds the host budget around each build phase. `bazel --commit-gate` i
 | Tag | Repository |
 |---|---|
 | `python` | a Python environment: the pinned CPython, a hash-pinned lock's packages, then packages pinned by commit and this module's `fsla_devtools`, built once a key into the machine's shared store (`fsla_devtools.graph.make_env`); `isolated_builds = False` builds the pinned packages against the environment, for one whose build imports a locked package |
-| `pinned` | a release pinned by URL and digest (uv, mold, clang-tidy) |
+| `pinned` | a release pinned by URL and digest (uv, mold, clang-tidy, Nsight Compute), an archive a .tar.gz or a .tar.xz |
 | `cuda_toolkit` | a CUDA toolkit from NVIDIA's redistributables, pinned by their manifest's digest (which carries each component's) |
 | `host_cc`, `host_gpu` | the host C++ compiler's and the machine's devices' identities, which actions that depend on them are keyed on |
 | `tree` | the checkout's tracked files (`git ls-files`; the commit's index under the commit gate) |
@@ -322,11 +322,23 @@ the `python` tag builds into: each environment build sweeps, under the store's l
 and the cached wheels nothing hardlinks, and, over the size, the oldest of them, never the environment it was asked for;
 a swept environment a checkout still names is rebuilt from the cache or the index.
 
-`pins/uv_pin.json` is the uv every workspace's environment is built by.
+**The shared pins** (`pins/`, each a workspace's `@fsla_devtools//pins:<name>_pin.json`): one pin for each tool every FSLA workspace shares.
+
+| Pin | Names |
+|---|---|
+| `uv_pin.json` | the uv every workspace's environment is built by, and the Python it installs |
+| `cuda_toolkit_pin.json` | the CUDA toolkit (CUDA 13.5): NVIDIA's redistributable components at the release manifest's digest, what a workspace's `cuda_toolkit` tag unpacks |
+| `nsight_compute_pin.json` | Nsight Compute, the profiler (`ncu`): the toolkit's manifest release of the component, by its archive's digest, what a workspace's `pinned` tag fetches and a developer's box installs |
+| `bazelisk_pin.json` | Bazel's launcher, the one tool a workspace bootstraps outside its graph |
+| `bazel_version` | the Bazel release the pins are tested with |
+
+Each workspace keeps its own `.bazelversion`; `bazel_version_test(name, version = ".bazelversion")` (`bazel/rules.bzl`) fails
+a workspace whose file differs from `pins/bazel_version`, the Bazel release the pins are tested with (this repository's own `.bazelversion` is held to it by the same test). A workspace puts it
+in its gate. A `pinned` tag fetches a `.tar.gz`, a `.tar.xz`, a wheel or a bare binary by its pin.
 
 **The generic rules** (`bazel/rules.bzl`): a check over the tracked tree (`tree_test`), a check of the commit
 (`checkout_test`), a tree tool as a test (`tool_test`) or a run target (`tool_run`), a package's part of the tree
-(`tree_part`), and the pytest tiers (`pytest_tier`, `device_lane`). Each takes the workspace's environment as an
+(`tree_part`), the pytest tiers (`pytest_tier`, `device_lane`) and the Bazel release check (`bazel_version_test`). Each takes the workspace's environment as an
 argument; a workspace wraps them once with its own. A check over the tree or a tier that reads another repository's
 files names it in `repos` (a label of it -> a variable): its files join the runfiles and its root is exported as that
 variable (`{"@fsla_data//:lab": "FSLA_DATA"}`, the pinned data). **The results store's rules** (`bazel/results.bzl`): the records'
@@ -342,7 +354,7 @@ index as a build output (`results_index`), a data repository's.
 bazel test //:gate
 ```
 
-The gate is ruff, its blank-line family, the tests and the declaration check, on the graph's own environment.
+The gate is ruff, its blank-line family, the tests, the declaration check and the Bazel release check, on the graph's own environment.
 The commit gate (`.githooks/pre-commit` -> `bazel/bazel --commit-gate`, every FSLA repository's hook) runs `//:gate` on
 the commit as git will write it: the changes not staged set aside, the tree the commit's index.
 

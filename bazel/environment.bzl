@@ -156,9 +156,10 @@ _python_repo = repository_rule(
 def _pinned_impl(rctx):
     pin = json.decode(rctx.read(rctx.attr.pin))
     asset = pin["release_asset"]
-    #: an archive unpacks from its pin's folder (`archive_root`) -- a wheel (a zip) names its root; a bare binary lands
+    #: an archive (a .tar.gz, a .tar.xz or a wheel, a zip) unpacks from its pin's folder (`archive_root`); a bare binary lands
     #: at its `binary_path`
     wheel = asset.endswith(".whl")
+    archive = "zip" if wheel else "tar.xz" if asset.endswith(".tar.xz") else "tar.gz"
     #: the release URL, then its mirrors: the same asset through the host's API, which serves it as octet-stream
     urls = [pin["release_url"]] + pin.get("mirror_urls", [])
     headers = {"Accept": ["application/octet-stream"]}
@@ -168,7 +169,7 @@ def _pinned_impl(rctx):
         rctx.download_and_extract(
             url = urls,
             sha256 = pin["asset_sha256"],
-            type = "zip" if wheel else "tar.gz",
+            type = archive,
             stripPrefix = pin["archive_root"],
             headers = headers,
         )
