@@ -293,3 +293,10 @@ class StoreContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_run_ids_sort_in_the_order_the_runs_started_within_one_second():
+    from fsla_devtools.results.store import run_id
+
+    runs = [run_id() for _ in range(200)]
+    assert runs == sorted(runs) and len(set(runs)) == len(runs)

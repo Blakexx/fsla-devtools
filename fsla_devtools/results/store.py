@@ -47,9 +47,12 @@ def utc() -> str:
 
 
 def run_id() -> str:
-    """A run's identity: when it started (UTC, to the second) and eight random hex digits -- sortable, and the name of
-    the sample it stores."""
-    return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + os.urandom(4).hex()
+    """A run's identity and the name of the sample it stores: when it started (UTC, to the second, then the microsecond)
+    and eight random hex digits. Names sort in the order the runs started, two runs of one second included, so a
+    label's newest sample is its last name."""
+    now = time.time_ns()
+    return (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(now // 10**9)) + f"-{now // 1000 % 10**6:06d}-"
+            + os.urandom(4).hex())
 
 
 def digest(path: Path | str) -> str:

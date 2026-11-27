@@ -28,11 +28,11 @@ from __future__ import annotations
 import fnmatch
 import hashlib
 import json
-import secrets
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from ..results.store import run_id
 from . import identity, resources
 from .cache import Cache
 from .declare import Target
@@ -114,10 +114,6 @@ def _json_digest(value) -> str:
     if isinstance(value, dict):
         value = {k: v for k, v in value.items() if k != "local"}
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
-
-
-def run_id() -> str:
-    return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + secrets.token_hex(3)
 
 
 def build(roots, *, cache: Cache, runtime: Runtime, dry: bool = False, force: bool = False,
