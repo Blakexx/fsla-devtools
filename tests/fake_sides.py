@@ -29,7 +29,8 @@ def refuses(record, **_kw) -> dict:
 
 
 def refuses_one(record, **kw) -> dict:
-    """Refuses `corner-anti` the way a binary refuses an arm it does not carry, and produces every other cell."""
-    if record["name"] == "corner-anti":
-        raise RuntimeError(f"{__file__}: this build carries no arm for corner-anti")
+    """Refuses `carry-anti-64x64-T1024-carried` the way a binary refuses an arm it does not carry, and produces every
+    other cell."""
+    if record["name"] == "carry-anti-64x64-T1024-carried":
+        raise RuntimeError(f"{__file__}: this build carries no arm for {record['name']}")
     return flat(record, **kw)

@@ -95,6 +95,15 @@ class Derived(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "never derived"):
             Registry.load([write(self.dir, "b.json", {"schema": 1, "bases": [{"name": "x", "from": ["y"]}]})])
 
+    def test_a_record_that_writes_no_name_is_named_by_its_fields(self):
+        registry = self.load({"schema": 1, "data": "fake_provider:named",
+                              "cells": [{"tokens": 8}, {"vary": {"tokens": [16, 32]}}]})
+        self.assertEqual(sorted(registry.cells), ["t16", "t32", "t8"])
+        with self.assertRaisesRegex(ValueError, "named twice"):
+            self.load({"schema": 1, "data": "fake_provider:named", "cells": [{"tokens": 8}, {"tokens": 8}]})
+        record = registry.derive(None, (), data="fake_provider:named", tokens=64)
+        self.assertEqual(record["name"], "t64")
+
     def test_code_derives_a_cell_into_a_registry(self):
         registry = self.load({"schema": 1, "cells": []})
         record = registry.derive("generated", ["small"], seed=9)

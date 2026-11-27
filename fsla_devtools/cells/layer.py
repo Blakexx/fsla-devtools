@@ -1,65 +1,42 @@
-"""LAYER CELLS: a sequence layer's input as data -- the hidden states a layer's projections read and the values it mixes
--- drawn from a seed (moved from fsla's benchmarks/cells/layer.py, its constructor half left to the arms).
+"""LAYER CELLS: a sequence layer's input and how the layer is built to read it, as data -- the hidden states a layer's
+projections read and the values it mixes, drawn from a seed, and the routing and logit gain its producer is built with.
 
-A layer cell is ONLY the input: a batch of ``B`` sequences of ``tokens`` prefill tokens (and ``decode_steps`` more, taken
-one at a time after the prefill), hidden states of width ``hidden`` and values of ``H`` heads of width ``dv``, in one
-dtype. How a layer is built from it -- FSLA's routing widths, its entmax alpha, its logit gain; an attention layer's
-head count -- is the arm's parameters, so two arms on one layer cell read the same tensors. ``seed`` is the cell's: an
-arm that initializes parameters seeds them from it (`torch.manual_seed(seed)` immediately before construction), and
-the inputs come from a device generator at ``seed + 500``, so an arm's construction never moves them.
+A layer cell (`fsla_devtools.cells.form.Cell`, kind `layer`) is a batch of ``B`` sequences of ``tokens`` prefill tokens
+(and ``decode_steps`` more, taken one at a time after the prefill), hidden states of width ``hidden`` and values of
+``H`` write heads of width ``dv``, in one dtype; its ROUTING in FSLA's own terms (the topology, a write activation a
+level, a read tuple a read head of its ``group``) and its logit ``gain``, the factor the layer's routing projection is
+scaled by. How a package's layer is constructed from that is the package's (fsla's `measure.cells.layer`). ``seed`` is
+the cell's: an arm that initializes parameters seeds them from it (`torch.manual_seed(seed)` immediately before
+construction), and the inputs come from a device generator at ``seed + 500``, so a construction never moves them and
+two cells that differ only in how the layer is built read the same tensors.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 
-DTYPES = {"bf16": "bfloat16", "fp32": "float32"}
 #: the offset of the input generator's seed from the parameter seed
 INPUT_SEED_OFFSET = 500
 
 
-@dataclass(frozen=True, slots=True)
-class LayerCell:
-    """One layer input. Nothing derived is stored."""
-
-    name: str
-    B: int
-    tokens: int
-    H: int
-    #: the hidden width; 0 means ``H * dv``
-    hidden: int
-    dv: int
-    dtype: str
-    seed: int
-    decode_steps: int
-    note: str
-
-    @property
-    def hidden_size(self) -> int:
-        return self.hidden or self.H * self.dv
-
-    @property
-    def torch_dtype(self):
-        import torch
-
-        return getattr(torch, DTYPES[self.dtype])
-
-
-def layer_cell(name: str, **params) -> LayerCell:
-    """A layer cell's data provider (`layer.json` names it): the record's parameters, checked."""
-    unknown = sorted(set(params) - {f.name for f in fields(LayerCell)})
-    if unknown:
-        raise ValueError(f"{name}: undeclared field(s) {unknown}")
-    cell = LayerCell(name=name, **params)
-    if cell.dtype not in DTYPES:
-        raise ValueError(f"{name}: dtype {cell.dtype!r} is not one of {sorted(DTYPES)}")
-    return cell
+def check(cell) -> None:
+    """A layer cell's own rules (`form.cell` calls it): a routing of one write activation a level and one read tuple
+    (or one a read head of its group) of one entry a level, and a positive gain."""
+    r = cell.routing
+    if r is None or not r.topology or len(r.write) != r.D or len(r.read) not in (1, cell.group) \
+            or any(len(head) != r.D for head in r.read):
+        raise ValueError(f"a layer states one write activation a level and one read tuple (or one a read head of its "
+                         f"group of {cell.group}) of one entry a level; got {r}")
+    if cell.gain <= 0 or cell.decode_steps < 0:
+        raise ValueError(f"a layer's gain is positive and its decode steps none or more; got {cell.gain}, "
+                         f"{cell.decode_steps}")
 
 
 @dataclass(frozen=True, slots=True)
 class RealizedLayer:
     """A drawn layer cell: ``x`` ``[B, tokens + decode_steps, hidden]`` and ``v`` ``[B, tokens + decode_steps, H, dv]``."""
 
-    cell: LayerCell
+    #: the drawn cell (`form.Cell`, kind layer)
+    cell: object
     x: object
     v: object
 
@@ -70,7 +47,7 @@ class RealizedLayer:
         return self.x[:, :T].contiguous(), self.v[:, :T].contiguous()
 
 
-def realize(cell: LayerCell, device: str = "cuda") -> RealizedLayer:
+def realize(cell, device: str = "cuda") -> RealizedLayer:
     import torch
 
     gen = torch.Generator(device=device).manual_seed(cell.seed + INPUT_SEED_OFFSET)
@@ -80,4 +57,4 @@ def realize(cell: LayerCell, device: str = "cuda") -> RealizedLayer:
     return RealizedLayer(cell, x, v)
 
 
-__all__ = ["DTYPES", "LayerCell", "RealizedLayer", "layer_cell", "realize"]
+__all__ = ["INPUT_SEED_OFFSET", "RealizedLayer", "check", "realize"]

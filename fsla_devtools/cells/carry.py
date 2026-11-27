@@ -1,19 +1,20 @@
 """CARRY CELLS: a sparse recurrence's input as data -- per-level routing amplitudes on the simplex for both sides, a gain,
-the values, and the state the sequence enters with -- with one draw behind each record (moved from fsla's
-benchmarks/cells).
+the values, and the state the sequence enters with -- with one draw behind each record.
 
-`carry.json` holds the records; `carry_cell` validates one, and `realize` draws it: ``[B, L, H, B_l]`` read and write
-amplitudes per level, a ``[B, L, H]`` gain and ``[B, L, H, DV]`` values, in bf16, plus the entry state of a carried
-cell. A record declares a DRAW, a SHAPE and the STATE it binds -- which backing (`dense` or `paged`) and whether it
-enters empty (`fresh`), carries a drawn state (`carried`) or binds none -- and never how a kernel runs it: a launch
-shape, a window grid or a stream count is the arm's, so two kernels timed on one cell read the same tensors.
+`carry.json` holds the records (`fsla_devtools.cells.form.Cell`, kind `carry`); `check` holds one to a carry cell's
+rules, and `realize` draws it: ``[B, L, H, B_l]`` read and write amplitudes per level, a ``[B, L, H]`` gain and
+``[B, L, H, DV]`` values, in bf16, plus the entry state of a carried cell. A record declares its ROUTING (the topology
+and what each side draws on each level), its DRAW (the support structure), a shape and the STATE it binds -- which
+backing (`dense` or `paged`) and whether it enters empty (`fresh`), carries a drawn state (`carried`) or binds none --
+and never how a kernel runs it: a launch shape, a window grid or a stream count is the arm's, so two kernels timed on
+one cell read the same tensors.
 
 Every cell but the two degenerate ones states where in the routing distribution it sits (`regime`, on every axis of
 `fsla_devtools.cells.regimes.REGIME_AXES`), and `realize` proves it before any reader sees the draw.
 
 Symbols, each at first use: ``D`` = routing depth, ``B_l`` = level ``l``'s digit count, ``N = prod_l B_l`` = leaf
 capacity, ``DV`` = the value width, ``L`` = tokens, ``BH`` = batch times heads, ``k_tok`` = a token's nonzero digits
-per sparse level (a property of the draw, never told to a kernel).
+on a sparse level (a `k<n>` entry: a property of the draw, never told to a kernel).
 
 Standard library until a draw is realized: `realize` imports torch where it is called.
 """
@@ -22,12 +23,12 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass
 
-DRAWS = ("dense", "alt", "both", "read", "write", "cohort", "dead", "deposit",
-         "tied", "anti", "cold", "readonly", "concentrated", "onehot", "flip")
+#: the support structures a carry draw takes: `iid` (each level-side its routing entry's draw, every token alone),
+#: `cohort` (runs of `cohort` tokens share one digit window a sparse level), the CORNERS and the DEGENERATE draws
+CORNERS = ("anti", "cold", "readonly", "concentrated", "onehot", "flip")
 #: the draws with no support to sample, which state it themselves and declare no regime
 DEGENERATE = ("dead", "deposit")
-#: the draws that carry a `k_tok`
-COUNTED = ("alt", "both", "read", "write", "cohort", "tied")
+DRAWS = ("iid", "cohort", *CORNERS, *DEGENERATE)
 BACKINGS = ("dense", "paged")
 STATES = ("none", "fresh", "carried")
 #: who a cell is sized for: `oracle`, small enough for an fp64 reference; `probe`, a measurement's size; `both`
@@ -41,95 +42,46 @@ WINDOW = 512
 DEPOSIT_TOKEN = 5
 
 
-@dataclass(frozen=True, slots=True)
-class CarryCell:
-    """One record, validated. ``seed`` is the draw's random seed, stated by the record, so a failure reproduces from the
-    cell alone and a derived cell can change it."""
-
-    name: str
-    seed: int
-    widths: tuple[int, ...]
-    dv: int
-    tokens: int
-    draw: str
-    k_tok: int | None
-    cohort: int | None
-    support: float
-    backing: str
-    state: str
-    tier: str
-    #: ``((axis, value), ...)`` on every axis of `REGIME_AXES`; None for a degenerate draw
-    regime: tuple[tuple[str, str], ...] | None
-    #: GROUPED QUERIES: the query heads each write head's state is read by (the read side drawn at ``group`` times the
-    #: write side's heads, consecutively); 1 is the ungrouped cell
-    group: int = 1
-    #: the write heads a draw takes by default (`realize`'s ``H``): one head underfills a card, so a cell timed at
-    #: scale states its heads; 1 is the one-head cell
-    heads: int = 1
-
-    @property
-    def D(self) -> int:
-        return len(self.widths)
-
-    @property
-    def N(self) -> int:
-        n = 1
-        for width in self.widths:
-            n *= width
-        return n
-
-    def declared_sparsity(self) -> tuple[tuple[bool, bool], ...]:
-        """Per level, ``(read sparse, write sparse)``: the support the draw DECLARES, which a kernel may skip on. A dense,
-        degenerate or corner draw declares nothing; the alternation declares the read side sparse at the odd levels and
-        the write side at the even ones; ``both`` declares level zero sparse on both sides, ``read`` and ``write`` on that
-        side alone. A declaration may understate what the draw carries (a tied draw's zeros are undeclared) and never
-        overstates it."""
-        if self.draw not in ("alt", "both", "read", "write", "cohort") or self.k_tok is None:
-            return ((False, False),) * self.D
-        if self.draw in ("both", "read", "write"):
-            return tuple((level == 0 and self.draw != "write", level == 0 and self.draw != "read")
-                         for level in range(self.D))
-        return tuple((bool(level % 2), not level % 2) for level in range(self.D))
-
-
-def carry_cell(name: str, **params) -> CarryCell:
-    """A carry cell's data provider (`carry.json` names it): the record's parameters, validated."""
+def check(cell) -> None:
+    """A carry cell's own rules (`form.cell` calls it): a per-level draw states one write entry and one read tuple a
+    level (one tuple, or one a read head of its group), a corner or degenerate draw its topology alone; a cohort draw
+    carries its run; every draw but a degenerate one states its regime."""
     from .regimes import REGIME_AXES
 
-    regime = params["regime"]
-    cell = CarryCell(name=name, seed=params["seed"], widths=tuple(params["widths"]), dv=params["dv"], tokens=params["tokens"],
-                     draw=params["draw"], k_tok=params["k_tok"], cohort=params["cohort"], support=params["support"],
-                     backing=params["backing"], state=params["state"], tier=params["tier"],
-                     regime=None if regime is None else tuple((axis, regime[axis]) for axis in REGIME_AXES
-                                                              if axis in regime),
-                     group=params.get("group", 1), heads=params.get("heads", 1))
-    unknown = sorted(set(params) - {f.name for f in dataclasses.fields(CarryCell)})
-    if unknown:
-        raise ValueError(f"{name}: undeclared field(s) {unknown}")
-    if (cell.draw in DEGENERATE) != (regime is None):
-        raise ValueError(f"{name}: a {cell.draw} draw {'declares no' if cell.draw in DEGENERATE else 'states its'} regime")
-    if regime is not None:
-        if set(regime) != set(REGIME_AXES):
-            raise ValueError(f"{name}: the regime states {sorted(regime)}, not every axis of {list(REGIME_AXES)}")
-        for axis, value in regime.items():
-            if value not in REGIME_AXES[axis]:
-                raise ValueError(f"{name}: {value!r} is not a value of the {axis} axis {REGIME_AXES[axis]}")
+    r = cell.routing
+    if r is None or not r.topology:
+        raise ValueError("a carry cell states its routing's topology")
     for field, allowed in (("draw", DRAWS), ("backing", BACKINGS), ("state", STATES), ("tier", TIERS)):
         if getattr(cell, field) not in allowed:
-            raise ValueError(f"{name}: {field} {getattr(cell, field)!r} is not one of {allowed}")
-    if cell.group < 1 or (cell.group > 1 and cell.draw not in ("dense", "alt", "both", "cohort")):
-        raise ValueError(f"{name}: a group is one or more query heads a write head, and a grouped cell is a dense, "
-                         f"alt, both or cohort draw; got group {cell.group} on a {cell.draw} draw")
-    if cell.heads < 1:
-        raise ValueError(f"{name}: a cell draws one or more write heads; got heads {cell.heads}")
+            raise ValueError(f"{field} {getattr(cell, field)!r} is not one of {allowed}")
+    if cell.draw in ("iid", "cohort"):
+        if len(r.write) != r.D or len(r.read) not in (1, cell.group) or any(len(head) != r.D for head in r.read):
+            raise ValueError(f"a {cell.draw} draw states one write entry a level and one read tuple (or one a read "
+                             f"head of its group of {cell.group}) of one entry a level; got {r}")
+    elif r.write or r.read:
+        raise ValueError(f"a {cell.draw} draw is its own word: it states its topology alone, not entries")
+    if cell.group > 1 and cell.draw not in ("iid", "cohort"):
+        raise ValueError(f"a grouped cell is a per-level draw; got group {cell.group} on a {cell.draw} draw")
     if (cell.draw == "cohort") != (cell.cohort is not None):
-        raise ValueError(f"{name}: a cohort draw carries a cohort and nothing else does")
-    if cell.draw in COUNTED and cell.k_tok is None:
-        raise ValueError(f"{name}: a sparse draw states its k_tok")
-    if cell.draw not in COUNTED and cell.k_tok is not None:
-        raise ValueError(f"{name}: a {cell.draw} draw has no k_tok -- its support is stated by the draw itself, not by "
-                         "a count")
-    return cell
+        raise ValueError("a cohort draw carries a cohort and nothing else does")
+    if (cell.draw in DEGENERATE) != (cell.regime is None):
+        raise ValueError(f"a {cell.draw} draw {'declares no' if cell.draw in DEGENERATE else 'states its'} regime")
+    for axis, value in cell.regime or ():
+        if value not in REGIME_AXES[axis]:
+            raise ValueError(f"{value!r} is not a value of the {axis} axis {REGIME_AXES[axis]}")
+
+
+def declared_sparsity(cell) -> tuple[tuple[bool, bool], ...]:
+    """Per level, ``(read sparse, write sparse)``: the support the routing DECLARES, which a kernel may skip on -- an
+    entry that makes exact zeros (`form.sparse`), a tied read level declaring what its write side does. A corner or
+    degenerate draw declares nothing. A declaration may understate what the draw carries and never overstates it."""
+    from .form import sparse
+
+    r = cell.routing
+    if not r.write:
+        return ((False, False),) * r.D
+    return tuple((any(sparse(r.write[level] if head[level] == "tied" else head[level]) for head in r.read),
+                  sparse(r.write[level])) for level in range(r.D))
 
 
 # ------------------------------------------------------------------ the draw
@@ -182,7 +134,8 @@ class RealizedCell:
     a kernel fed their bf16 images would measure the cast, which is not what is under test.
     """
 
-    cell: CarryCell
+    #: the drawn cell (`form.Cell`, kind carry)
+    cell: object
     read: tuple
     write: tuple
     gain: object
@@ -209,10 +162,11 @@ def _degenerate(cell, shape, gen, device):
     import torch
 
     B, T, H = shape
-    zeros = tuple(torch.zeros(B, T, H, w, device=device, dtype=torch.float64) for w in cell.widths)
+    widths = cell.routing.topology
+    zeros = tuple(torch.zeros(B, T, H, w, device=device, dtype=torch.float64) for w in widths)
     write = zeros
     if cell.draw == "deposit":
-        write = tuple(torch.zeros(B, T, H, w, device=device, dtype=torch.float64) for w in cell.widths)
+        write = tuple(torch.zeros(B, T, H, w, device=device, dtype=torch.float64) for w in widths)
         for level in write:
             level[:, DEPOSIT_TOKEN, :, 0] = 1.0
     gain = torch.rand(B, T, H, device=device, dtype=torch.float64, generator=gen) + 0.5
@@ -240,7 +194,7 @@ def _one_hot(shape, gen, device):
 def _corner(cell, shape, gen, device):
     """``(read, write)`` for a CORNER draw -- a named region of the distribution a random draw does not reach.
 
-    ``tied``: one ``k_tok`` draw per level is both sides. ``anti``: level zero reads its first half of digits and writes
+    ``anti``: level zero reads its first half of digits and writes
     its second half, so no token reads a leaf it writes and every read leaf is cold. ``cold``: level zero's write side is
     confined to its leading ``support`` fraction under dense reads. ``readonly``: every token writes leaf zero and nothing
     else. ``concentrated``: every row carries 0.9 of its mass on one digit. ``onehot``: one live digit per row on both
@@ -258,10 +212,7 @@ def _corner(cell, shape, gen, device):
         mask[:width // 2] = float(not second)
         return mask
 
-    widths = cell.widths
-    if cell.draw == "tied":
-        read = tuple(simplex(shape + (w,), cell.k_tok, gen, device) for w in widths)
-        return read, read
+    widths = cell.routing.topology
     if cell.draw == "onehot":
         return (tuple(_one_hot(shape + (w,), gen, device) for w in widths),
                 tuple(_one_hot(shape + (w,), gen, device) for w in widths))
@@ -291,25 +242,28 @@ def _corner(cell, shape, gen, device):
     return tuple(read), tuple(write)
 
 
-def realize(cell: CarryCell, B: int = 1, H: int | None = None, device: str = "cuda") -> RealizedCell:
-    """Draw ``cell`` at ``H`` write heads (the cell's ``heads`` unless given): ``[B, L, H, B_l]`` per level, ``[B, L, H]``
+def realize(cell, B: int = 1, H: int | None = None, device: str = "cuda") -> RealizedCell:
+    """Draw ``cell`` at ``H`` write heads (the cell's ``H`` unless given): ``[B, L, H, B_l]`` per level, ``[B, L, H]``
     gain, ``[B, L, H, DV]`` v, and a carried cell's entry -- the read levels at ``H group`` query heads for a grouped
     cell, each write head's read by its ``group`` consecutive.
 
-    THE ALTERNATION (Blake, 2026-08-19): per level at most ONE sparse side, and the sparse side alternates -- EVEN levels
-    write-sparse / read-dense, ODD levels read-sparse / write-dense -- so the two sides' clause sets are different level
-    subsets. ``both`` is sparse on both sides at level zero and dense above it; the two sides are drawn INDEPENDENTLY
-    there on purpose, because a kernel may never assume they agree. ``read`` is sparse on the read side alone at level
-    zero, ``write`` on the write side alone: one side listed, the other dense at every level.
+    A PER-LEVEL DRAW is its routing's entries: each untied read level at the cell's read heads, then each write level,
+    in level order -- `dense` a dense simplex row, `k<n>` exactly n nonzero digits a token (a cohort draw's runs), the
+    `support` truncation over both -- and a `tied` read level is its write level, the same tensor. The alternation
+    (Blake, 2026-08-19) is the routing whose write side is sparse at the even levels and read side at the odd ones.
     """
     import torch
 
-    H = cell.heads if H is None else H
+    from .form import entry
+
+    H = cell.H if H is None else H
     gen = torch.Generator(device=device).manual_seed(cell.seed)
     shape = (B, cell.tokens, H)
-    live = tuple(max(1, int(w * cell.support)) for w in cell.widths)
+    widths = cell.routing.topology
+    live = tuple(max(1, int(w * cell.support)) for w in widths)
 
-    def draw(width, kt, lv, at=shape):
+    def draw(width, word, lv, at=shape):
+        kt = entry(word)[1]
         if kt is None or kt >= width:
             return simplex(at + (width,), None, gen, device, live=lv)
         if cell.draw == "cohort":
@@ -319,21 +273,15 @@ def realize(cell: CarryCell, B: int = 1, H: int | None = None, device: str = "cu
     if cell.draw in DEGENERATE:
         drawn = _degenerate(cell, shape, gen, device)
     else:
-        kt = cell.k_tok
-        if cell.draw in ("dense", "alt", "both", "read", "write", "cohort"):
-            if cell.draw == "dense":
-                read_k = write_k = [None] * cell.D
-            elif cell.draw in ("both", "read", "write"):
-                first = [kt if level == 0 else None for level in range(cell.D)]
-                read_k = first if cell.draw != "write" else [None] * cell.D
-                write_k = first if cell.draw != "read" else [None] * cell.D
-            else:
-                read_k = [kt if level % 2 else None for level in range(cell.D)]
-                write_k = [None if level % 2 else kt for level in range(cell.D)]
+        if cell.draw in ("iid", "cohort"):
+            #: every read head of the group reads by one tuple (`check`)
+            (reads,) = set(cell.routing.read)
             #: each level cast as it is drawn, one fp64 level alive at a time (the stream's order unchanged)
-            read = tuple(draw(w, read_k[level], live[level], (B, cell.tokens, H * cell.group)).to(torch.bfloat16)
-                         for level, w in enumerate(cell.widths))
-            write = tuple(draw(w, write_k[level], live[level]).to(torch.bfloat16) for level, w in enumerate(cell.widths))
+            untied = {level: draw(w, reads[level], live[level], (B, cell.tokens, H * cell.group)).to(torch.bfloat16)
+                      for level, w in enumerate(widths) if reads[level] != "tied"}
+            write = tuple(draw(w, cell.routing.write[level], live[level]).to(torch.bfloat16)
+                          for level, w in enumerate(widths))
+            read = tuple(untied.get(level, write[level]) for level in range(len(widths)))
         else:
             read, write = _corner(cell, shape, gen, device)
             read, write = tuple(x.to(torch.bfloat16) for x in read), tuple(x.to(torch.bfloat16) for x in write)
@@ -341,9 +289,10 @@ def realize(cell: CarryCell, B: int = 1, H: int | None = None, device: str = "cu
         v = torch.randn(*shape, cell.dv, device=device, dtype=torch.float64, generator=gen)
         drawn = RealizedCell(cell=cell, read=read, write=write, gain=gain.to(torch.bfloat16), v=v.to(torch.bfloat16))
     if cell.state == "carried":
-        entry = 0.1 * torch.randn(B * H, cell.N, cell.dv + 1, device=device, dtype=torch.float64, generator=gen)
-        entry[..., cell.dv] = entry[..., cell.dv].abs()
-        drawn = dataclasses.replace(drawn, entry=entry.to(torch.float32))
+        entry_state = 0.1 * torch.randn(B * H, cell.routing.N, cell.dv + 1, device=device, dtype=torch.float64,
+                                        generator=gen)
+        entry_state[..., cell.dv] = entry_state[..., cell.dv].abs()
+        drawn = dataclasses.replace(drawn, entry=entry_state.to(torch.float32))
     if cell.regime is not None:
         from .regimes import prove
 
@@ -351,5 +300,5 @@ def realize(cell: CarryCell, B: int = 1, H: int | None = None, device: str = "cu
     return drawn
 
 
-__all__ = ["BACKINGS", "DEGENERATE", "DEPOSIT_TOKEN", "DRAWS", "STATES", "TIERS", "WINDOW", "CarryCell", "RealizedCell",
-           "carry_cell", "clustered", "realize", "simplex"]
+__all__ = ["BACKINGS", "CORNERS", "DEGENERATE", "DEPOSIT_TOKEN", "DRAWS", "STATES", "TIERS", "WINDOW", "RealizedCell",
+           "check", "clustered", "declared_sparsity", "realize", "simplex"]

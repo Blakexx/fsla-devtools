@@ -1,60 +1,50 @@
-"""PRODUCER CELLS: the routing producer's input as data -- logits at a stated SCALE, a mask, and the alpha they are
-solved at.
+"""PRODUCER CELLS: the routing producer's input as data -- one level's logits at a stated logit GAIN, a mask, and the
+activation they are solved at.
 
-The producer is the step that turns logits into routing amplitudes on the simplex (entmax at `alpha`), and the thing
+The producer is the step that turns logits into routing amplitudes on the simplex (entmax at its alpha), and the thing
 that distinguishes two implementations of it is not the amplitudes in the middle of the distribution but WHERE THE
-SUPPORT ENDS. A cell therefore declares its `scale`, because the scale is the axis that moves the boundary:
+SUPPORT ENDS. A cell (`fsla_devtools.cells.form.Cell`, kind `producer`) therefore declares its `gain`, the scale its
+logits are drawn at, because the gain is the axis that moves the boundary:
 
     0.5   a nearly dense simplex -- almost every digit survives, and a support disagreement is nearly impossible
     3     the working regime
     30    where a bisection's finite iteration count shows, and where two implementations are likeliest to disagree
           about which digits survive at all
 
-`mask` is a RAGGED one when a cell declares it, never a uniform one: padding past a level's logical width is what a
-kernel's mask does, and a uniform mask exercises none of the boundary the mask exists for.
+`masked` is a RAGGED mask, never a uniform one: padding past a level's logical width is what a kernel's mask does, and a
+uniform mask exercises none of the boundary the mask exists for.
 
-Symbols, each at first use: `width` = the level's digit count, `rows` = independent logit rows drawn, `alpha` = the
-entmax parameter (1.5 is the sparse producer, 2 is sparsemax).
+Symbols, each at first use: the cell's routing is ONE level, `width` digits (its topology) under one write activation,
+`entmax<alpha>` (1.5 is the sparse producer, 2 is sparsemax); `tokens` = the independent logit rows drawn.
 
 Standard library until a draw is realized: `realize` imports torch where it is called.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
-
 #: the alphas a shipped producer solves at
 ALPHAS = (1.5, 2.0)
 
 
-@dataclass(frozen=True, slots=True)
-class ProducerCell:
-    name: str
-    seed: int
-    width: int
-    scale: float
-    alpha: float = 1.5
-    rows: int = 8
-    masked: bool = False
+def alpha(cell) -> float:
+    """The alpha the cell's one level is solved at."""
+    from .form import entry
 
-    @property
-    def shape(self) -> tuple:
-        return (self.rows, self.width)
+    return entry(cell.routing.write[0])[1]
 
 
-def producer_cell(name: str, **params) -> ProducerCell:
-    """A producer cell's data provider (`producer.json` names it)."""
-    unknown = sorted(set(params) - {f.name for f in fields(ProducerCell)})
-    if unknown:
-        raise ValueError(f"{name}: undeclared field(s) {unknown}")
-    cell = ProducerCell(name, **params)
-    if cell.alpha not in ALPHAS:
-        raise ValueError(f"{name}: alpha {cell.alpha} is not one a shipped producer solves at {ALPHAS}")
-    if cell.width < 1 or cell.rows < 1:
-        raise ValueError(f"{name}: a cell draws at least one row of at least one digit")
-    return cell
+def check(cell) -> None:
+    """A producer cell's own rules (`form.cell` calls it): one level of at least one digit, one write activation a
+    shipped producer solves, no read side."""
+    r = cell.routing
+    if r is None or r.D != 1 or len(r.write) != 1 or r.read:
+        raise ValueError(f"a producer cell is one level under one write activation, with no read side; got {r}")
+    if r.topology[0] < 1:
+        raise ValueError("a producer cell draws at least one digit")
+    if alpha(cell) not in ALPHAS:
+        raise ValueError(f"alpha {alpha(cell)} is not one a shipped producer solves at {ALPHAS}")
 
 
-def realize(cell: ProducerCell, device: str = "cpu"):
+def realize(cell, device: str = "cpu"):
     """`(logits, mask)`: the cell's logit rows and its mask, or `None` where it declares none.
 
     fp64 and on the CPU by default: the producer's reference is a pure-torch fp64 object, and what is being compared
@@ -62,16 +52,18 @@ def realize(cell: ProducerCell, device: str = "cpu"):
     """
     import torch
 
+    width = cell.routing.topology[0]
+    shape = (cell.tokens, width)
     gen = torch.Generator(device=device).manual_seed(cell.seed)
-    draw = lambda: torch.randn(cell.shape, generator=gen, dtype=torch.float64, device=device) * cell.scale  # noqa: E731
+    draw = lambda: torch.randn(shape, generator=gen, dtype=torch.float64, device=device) * cell.gain  # noqa: E731
     mask = None
     if cell.masked:
-        mask = torch.ones(cell.shape, dtype=torch.bool, device=device)
+        mask = torch.ones(shape, dtype=torch.bool, device=device)
         #: RAGGED, a different live width per row: a uniform mask is a narrower cell, not a masked one
-        flat = mask.reshape(-1, cell.width)
+        flat = mask.reshape(-1, width)
         for row in range(flat.shape[0]):
-            flat[row, max(1, cell.width - row % cell.width):] = False
+            flat[row, max(1, width - row % width):] = False
     return draw(), mask
 
 
-__all__ = ["ALPHAS", "ProducerCell", "producer_cell", "realize"]
+__all__ = ["ALPHAS", "alpha", "check", "realize"]

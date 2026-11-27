@@ -317,24 +317,29 @@ A member the dashboard shows that failed shows its failure, never a median of th
 
 ## The central cell registry
 
-A cell is an input, named once for every package: `fsla_devtools/cells/carry.json` (a sparse recurrence's routing
-amplitudes, gain, values and the state it enters with, including the state's backing), `layer.json` (a layer's hidden
-states and values) and `qkv.json` (attention's queries, keys and values). A record holds the input and never how a
-package runs it -- a kernel's launch shape, FSLA's routing widths or gain, an attention backend are an arm's -- so two
-arms on one cell read the same tensors, and when the registry changes, a package that no longer fits it is what changes.
+A cell is an input, named once for every package, in ONE FORM for every kind (`fsla_devtools.cells.form.Cell`):
+`fsla_devtools/cells/carry.json` (a sparse recurrence's routing amplitudes, gain, values and the state it enters with,
+including the state's backing), `layer.json` (a layer's hidden states and values, and the routing and logit gain its
+producer is built with), `producer.json` (one routing level's logits at a logit gain) and `qkv.json` (attention's
+queries, keys and values). A cell's routing is stated in FSLA's own terms -- the topology, what the write side does on
+each level, what each read head of a group does -- so a layer and a carry cell state it the same way. A cell's NAME is
+computed from its fields by one function (`form.name`: `carry-alt-k4-256x256-T1024`, `layer-dense-softmax-64x64-T512`,
+`qkv-L1024-dv64`) and never written by hand. A record holds the input and never how a package runs it -- a kernel's
+launch shape, an attention backend, a call count are an arm's -- so two arms on one cell read the same tensors, and when
+the registry changes, a package that no longer fits it is what changes.
 
 ```python
 from fsla_devtools.cells import cell, carry
 
-drawn = carry.realize(cell("flagship-alt-k4"))   # bf16 read/write levels, gain, v; the entry state of a carried cell
+drawn = carry.realize(cell("carry-alt-k4-256x256-T1024"))   # bf16 read/write levels, gain, v; a carried cell's entry
 ```
 
 Every carry cell but the two degenerate ones declares where in the routing distribution it sits on six axes (density,
 coherence, read/write correlation, mass, tail, support; `fsla_devtools.cells.regimes`), and `realize` proves the draw is
 there before returning it. Every cell states the seed its data is drawn from, so a failure reproduces from the record.
 A base (`bases.json`) is a fragment, never a cell; a derived cell merges the bases its `from` lists in order, and `vary`
-with a name pattern makes one cell per value. Loading and checking the registry needs only the standard library;
-realizing a cell needs torch.
+makes one cell per value, each named by its fields. Loading, naming and checking the registry needs only the standard
+library; realizing a cell needs torch.
 
 ## The dev config and the machine's locks
 

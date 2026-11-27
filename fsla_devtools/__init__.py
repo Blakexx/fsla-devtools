@@ -2,9 +2,9 @@
 
 - `fsla_devtools.mirror`: the declarations (every tracked path declared ships or private) and the private-shaped content
   the tripwire refuses, run by each repository's commit gate; `fsla_devtools.tripwire` runs the checks at commit and push.
-- `fsla_devtools.cells`: the central cell registry -- every input (carry, layer, QKV) with its draw, seed and regime
-  proof, named once for every package -- with bases, derived cells, and each cell's description, which a Bazel target
-  or a declaration's node takes a cell as.
+- `fsla_devtools.cells`: the central cell registry -- every input (carry, layer, producer, QKV) in one form, with its
+  draw, seed and regime proof, named once for every package by its own fields -- with bases, derived cells, and each
+  cell's description, which a Bazel target or a declaration's node takes a cell as.
 - `fsla_devtools.build`: the declared build system -- targets declared in files, keyed, cached, held and run.
 - `fsla_devtools.timing`: the timing system -- the session program a Bazel run target starts, and as the declared build
   system's targets interleaved clock-locked sessions, memory passes, null gates.

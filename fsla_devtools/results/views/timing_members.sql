@@ -1,7 +1,7 @@
 -- Every member of every timing session a store target kept (fsla-devtools' `measure_timing`, stored at
 -- `timing/session`): one row per (session sample, member). `owner` is the registration that made the member
 -- (`tip/carry_forward`, `bench/flash`); `label` is its scope, the checkout or library a root named (`tip`), and `arm`
--- its last segment (`carry_forward`, `entmax_solve@layer=chunk-decode-w16`). `status` is `ok` or `failed` (an entry that
+-- its last segment (`carry_forward`, `entmax_solve`). `status` is `ok` or `failed` (an entry that
 -- could not run, with its `error`); `git_sha`, `diff_sha256` and `checkout` are the owner's checkout (the sample's
 -- provenance); `device` and `torch` are what the entry built, and `level` is what it prices -- `kernel`, `op` or
 -- `layer` (Blake, 2026-09-15) -- so a reading pairs members of ONE level: a library's layer against another

@@ -24,6 +24,9 @@ from fsla_devtools.diff.strategies import bit_identical, per_slot, support_equal
 
 HERE = Path(__file__).resolve().parent
 
+#: two central cells the diffs run over
+ANTI, ONEHOT = "carry-anti-64x64-T1024-carried", "carry-onehot-16x16-T1024"
+
 
 class Rules(unittest.TestCase):
     """The rules alone, on planted numbers: no build, no cells."""
@@ -94,7 +97,7 @@ class Node(unittest.TestCase):
             return {r.label: r for r in build(roots, cache=Cache(self.root / "cache"), runtime=runtime,
                                               log=lambda _l: None)}
 
-    def sides(self, g, right_params, *, left_params=None, executor="fake_sides:flat", names=("corner-anti", "corner-onehot")):
+    def sides(self, g, right_params, *, left_params=None, executor="fake_sides:flat", names=(ANTI, ONEHOT)):
         nodes = cell_nodes(g, names)
         left = side(g, "left", env=self.env(), executor=executor, cells=nodes, params=left_params or {}, holds={})
         right = side(g, "right", env=self.env(), executor=executor, cells=nodes, params=right_params, holds={})
@@ -109,8 +112,8 @@ class Node(unittest.TestCase):
         self.assertEqual(out["same"].output["compared"], 2)
         #: THE RAW STAYS PUT: the tensors are a file of the side's workspace, and the diff's own output carries
         #: verdicts about them and no numbers from them
-        self.assertTrue((Path(out["left"].dir) / "corner-anti.pt").is_file())
-        self.assertEqual(sorted(out["same"].output["cells"]["corner-anti"]["quantities"]), ["state", "y"])
+        self.assertTrue((Path(out["left"].dir) / "carry-anti-64x64-T1024-carried.pt").is_file())
+        self.assertEqual(sorted(out["same"].output["cells"][ANTI]["quantities"]), ["state", "y"])
         self.assertNotIn("file", json.dumps(out["same"].output["cells"]))
 
     def test_a_difference_fails_the_build_by_default_and_the_message_names_the_worst_slot(self):
@@ -130,7 +133,7 @@ class Node(unittest.TestCase):
         self.assertEqual(out["moved"].status, "ran")
         self.assertEqual(out["moved"].output["status"], "failed")
         self.assertFalse(out["moved"].output["held"])
-        self.assertEqual(out["moved"].output["differing"], ["corner-anti", "corner-onehot"])
+        self.assertEqual(out["moved"].output["differing"], [ANTI, ONEHOT])
 
     def test_expecting_a_difference_is_the_non_vacuity_half_and_agreement_breaks_that_claim(self):
         g = Graph()
@@ -147,13 +150,13 @@ class Node(unittest.TestCase):
 
     def test_a_cell_a_side_could_not_produce_is_not_a_comparison_that_passed(self):
         g = Graph()
-        nodes = cell_nodes(g, ["corner-anti"])
+        nodes = cell_nodes(g, [ANTI])
         left = side(g, "left", env=self.env(), executor="fake_sides:flat", cells=nodes, holds={})
         right = side(g, "right", env=self.env(), executor="fake_sides:refuses", cells=nodes, holds={})
         out = self.go([diff(g, "half", left=left, right=right, strategy="bit-identical", on_difference="record")])
         self.assertEqual(out["right"].status, "ran")  #: producing nothing is the CELL's failure, not the side's
         self.assertFalse(out["half"].output["held"])
-        self.assertEqual(out["half"].output["unusable"], ["corner-anti"])
+        self.assertEqual(out["half"].output["unusable"], [ANTI])
         self.assertIn("produced no comparison", out["half"].output["detail"])
 
     def test_a_side_that_imported_its_library_from_somewhere_else_refuses_to_be_a_side(self):
@@ -161,7 +164,7 @@ class Node(unittest.TestCase):
         resolves its package through the install's path entry -- the canonical checkout -- so a side run from another
         worktree can import the very tree it is being compared against and agree with it perfectly."""
         g = Graph()
-        nodes = cell_nodes(g, ["corner-anti"])
+        nodes = cell_nodes(g, [ANTI])
         out = self.go([side(g, "bound", env=self.env(), executor="fake_sides:flat", cells=nodes, holds={},
                             binds="fsla_devtools")])
         self.assertEqual(out["bound"].status, "failed")
@@ -171,14 +174,14 @@ class Node(unittest.TestCase):
         """A kernel against its own fp64 reference shares a library by design; the same executor twice from one file
         compared a tree with itself."""
         g = Graph()
-        nodes = cell_nodes(g, ["corner-anti"])
+        nodes = cell_nodes(g, [ANTI])
         kw = {"env": self.env(), "cells": nodes, "holds": {}, "binds": "fake_sides"}
         left = side(g, "kernel", executor="fake_sides:flat", **kw)
         right = side(g, "reference", executor="fake_sides:sparse", **kw)
         out = self.go([diff(g, "kvo", left=left, right=right, strategy="bit-identical", on_difference="record")])
         self.assertEqual(out["kvo"].status, "ran")  #: compared, and the functions differ, which is honest
         g2 = Graph()
-        nodes2 = cell_nodes(g2, ["corner-anti"])
+        nodes2 = cell_nodes(g2, [ANTI])
         twice = [side(g2, n, executor="fake_sides:flat", env=self.env(), cells=nodes2, holds={}, binds="fake_sides")
                  for n in ("a", "b")]
         vacuous = self.go([diff(g2, "self", left=twice[0], right=twice[1], strategy="bit-identical")])
@@ -189,7 +192,7 @@ class Node(unittest.TestCase):
         """Two binaries that carry no arm for a cell agree about it: the cell is `refused`, not `unusable`, and the
         verdict on the cells both sides ran is not hidden behind it."""
         g = Graph()
-        nodes = cell_nodes(g, ["corner-anti", "corner-onehot"])
+        nodes = cell_nodes(g, [ANTI, ONEHOT])
         kw = {"env": self.env(), "cells": nodes, "holds": {}}
         #: one side binds so the record carries a binding proof; both binding the same function would be the vacuous pair
         left = side(g, "left", executor="fake_sides:refuses_one", binds="fake_sides", **kw)
@@ -197,14 +200,14 @@ class Node(unittest.TestCase):
         out = self.go([diff(g, "d", left=left, right=right, strategy="bit-identical")])["d"]
         self.assertEqual(out.status, "ran")
         self.assertEqual((out.output["refused"], out.output["unusable"], out.output["compared"], out.output["held"]),
-                         (["corner-anti"], [], 1, True))
+                         ([ANTI], [], 1, True))
         #: a record carries no machine path: the binding proof and a refusal's text name files inside the checkout
         self.assertNotIn(str(HERE), json.dumps(out.output))
 
     def test_a_comparison_that_compared_less_than_it_declared_is_a_refusal_not_a_pass(self):
         """P7, THE COUNT: a gate that cannot run says so rather than reporting a verdict over whatever survived."""
         g = Graph()
-        left, right = self.sides(g, {}, names=("corner-anti",))
+        left, right = self.sides(g, {}, names=(ANTI,))
         out = self.go([diff(g, "thin", left=left, right=right, strategy="bit-identical", minimum=99,
                             on_difference="record")])
         self.assertEqual(out["thin"].output["quantities"], 2)
@@ -224,8 +227,8 @@ class Node(unittest.TestCase):
                      params={"clauses": [[1e-2, 0.0]], "per_quantity": {"y": {"clauses": [[1e-4, 0.0]]}}})
         out = self.go([tight])["tight"].output
         self.assertFalse(out["held"])
-        self.assertTrue(out["cells"]["corner-anti"]["quantities"]["state"]["same"])  #: the default rule still holds elsewhere
-        self.assertEqual(out["cells"]["corner-anti"]["quantities"]["y"]["bound_by"], "clause (0.0001, 0.0)")
+        self.assertTrue(out["cells"][ANTI]["quantities"]["state"]["same"])  #: the default rule still holds elsewhere
+        self.assertEqual(out["cells"][ANTI]["quantities"]["y"]["bound_by"], "clause (0.0001, 0.0)")
 
 
 if __name__ == "__main__":
