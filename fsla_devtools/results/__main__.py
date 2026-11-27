@@ -1,5 +1,5 @@
 """python -m fsla_devtools.results [--root RECORDS] check | refile --plan PLAN --from CHECKOUT --table TABLE |
-show [LABEL] | commit -m MESSAGE | index [--db FILE] | sql QUERY | history|latest LOCATION | verdict |
+show [LABEL] | commit -m MESSAGE | index [--db FILE] | sql QUERY | history|latest LABEL | verdict |
 instruments --baseline RUN | dashboard --out FILE"""
 from __future__ import annotations
 

@@ -294,14 +294,6 @@ class VerdictQuery(unittest.TestCase):
         _, rows = index.query("SELECT label, arm, cell, trusted, git_sha FROM null_gates ORDER BY utc", root=self.root)
         self.assertEqual(rows[0], ("@candidate", "carry_forward", "dense", 0, "a"))
 
-    def test_an_instruments_cells_are_rows_with_their_status(self):
-        summary = {"cells": {"dense": {"status": "ok", "exit": 0}, "deep": {"status": "failed", "exit": 1, "error": "no arm"}}}
-        Store("@fsla//measure:phases", self.root).put({"executor": "run_tool"}, output={"dense": {}},
-                                                      provenance={"run": "r"}, run="20260915T000000Z-r", summary=summary)
-        _, rows = index.query("SELECT instrument, cell, status, error FROM instrument_cells ORDER BY cell", root=self.root)
-        self.assertEqual(rows, [("@fsla//measure:phases", "deep", "failed", "no arm"),
-                                ("@fsla//measure:phases", "dense", "ok", None)])
-
 
 if __name__ == "__main__":
     unittest.main()

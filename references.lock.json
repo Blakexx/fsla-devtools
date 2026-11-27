@@ -15,7 +15,7 @@
   {"doc": "README.md", "pinned_at": "15df016afc41", "reviewed": true, "sha256": "155f72ada283d7eb", "target": "fsla_devtools/cells/form.py::Cell"},
   {"doc": "README.md", "pinned_at": "8941d7d91b2a", "reviewed": true, "sha256": "", "target": "fsla_devtools/cells/regimes.py"},
   {"doc": "README.md", "pinned_at": "8941d7d91b2a", "reviewed": true, "sha256": "", "target": "fsla_devtools/config.py"},
-  {"doc": "README.md", "pinned_at": "5fbc02109e5f", "reviewed": true, "sha256": "6a5fe110a22336bc", "target": "fsla_devtools/config.py::MACHINE"},
+  {"doc": "README.md", "pinned_at": "eb83074961e5", "reviewed": true, "sha256": "421747a850bdbd37", "target": "fsla_devtools/config.py::MACHINE"},
   {"doc": "README.md", "pinned_at": "8941d7d91b2a", "reviewed": true, "sha256": "", "target": "fsla_devtools/diff/__init__.py"},
   {"doc": "README.md", "pinned_at": "5fbc02109e5f", "reviewed": true, "sha256": "", "target": "fsla_devtools/diff/side.py"},
   {"doc": "README.md", "pinned_at": "5fbc02109e5f", "reviewed": true, "sha256": "", "target": "fsla_devtools/diff/verdict.py"},

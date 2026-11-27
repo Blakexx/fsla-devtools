@@ -35,7 +35,6 @@ class Key:
 MACHINE: dict[str, dict[str, Key]] = {
     "host": {
         "nvcc_threads": Key("int", 2, "nvcc -t for each compile job"),
-        "build_jobs": Key("int?", None, "ninja jobs a build asks for; null derives it from nvcc_threads and memory"),
         "budget_slots": Key("int?", None, "the machine-wide compute slots every build and census compile shares; "
                             "null derives cores - 2 bounded by memory (fsla_devtools.locks.host)"),
         #: THE ONE LOCK PATH: the machine's locks in one directory of their own, the same path on every machine -- a
