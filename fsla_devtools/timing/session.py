@@ -1,7 +1,7 @@
 """THE TIMING SESSION PROGRAM: one interleaved session over timing entries, started by a Bazel run target and stored.
 
     bazel run //measure:session_entmax [-- --scratch DIR] [--no-store] [--store-root DIR]
-    bazel run //measure:null_entmax          # its null gate
+    bazel run //measure:null_<group>_<arms>  # a null gate (fsla-bench declares them)
     bazel run //measure:memory               # a memory pass
     python -m fsla_devtools.timing.session --runfiles DIR --manifest PATH [...]   # what the target's launcher runs
 
