@@ -1,7 +1,7 @@
 """THE GRAPH'S GENERIC RULES, every FSLA repository's: a check over the tree's tracked files (`tree_test`), a check of the
-commit (`checkout_test`), a tree tool as a test (`tool_test`) or as a run target (`tool_run`), a package's part of the
-tree (`tree_part`), the pytest tiers (`pytest_tier`, `device_lane`) and the check of a workspace's Bazel release
-(`bazel_version_test`). A workspace's environment is its own (the
+commit (`checkout_test`), the doc references (`docrefs_test`), a tree tool as a test (`tool_test`) or as a run target
+(`tool_run`), a package's part of the tree (`tree_part`), the pytest tiers (`pytest_tier`, `device_lane`) and the check
+of a workspace's Bazel release (`bazel_version_test`). A workspace's environment is its own (the
 environment extension's `python` tag), so each rule takes it as an argument: `venv`, the environment's store path from
 its `flags.bzl`, and `python`, its interpreter's label. A workspace wraps these once with its own environment.
 """
@@ -128,6 +128,72 @@ def checkout_test(name, cmd, **kwargs):
     """A check of the commit rather than of a tree -- what git knows (HEAD, the index, pinned commits): run in the
     checkout, outside the sandbox, never cached, since its input is the repository's state and not a file set."""
     _checkout_test(name = name, cmd = cmd, tags = ["external", "local"], **kwargs)
+
+_DOCREFS_TEST = """\
+#!/bin/bash
+# the doc references (fsla_devtools' docrefs_test): fsla_devtools.docrefs on the repository's interpreter, in the
+# checkout it is made from, under the repository's configuration; never cached. `bazel run` of it takes a command after
+# `--` (pending, accept, prune, init, move)
+set -euo pipefail
+python="$TEST_SRCDIR/_main/{python}"
+tool="$(readlink -f "$TEST_SRCDIR/_main/{tool}")"
+{data}cd "$(dirname "$(readlink -f "$TEST_SRCDIR/_main/{anchor}")")"
+exec "$python" -B "$tool" {flags} "$@"
+"""
+
+def _docrefs_test_impl(ctx):
+    runtime = ctx.attr.python[DefaultInfo]
+    python = runtime.files_to_run.executable
+    if python == None:
+        found = runtime.files.to_list()
+        if len(found) != 1:
+            fail("%s: python names %d files, not one interpreter" % (ctx.label, len(found)))
+        python = found[0]
+    flags = ["--lock", ctx.attr.lock, "--label", "//%s:%s" % (ctx.label.package, ctx.label.name)]
+    for name, directory in ctx.attr.packages.items():
+        flags += ["--package", "%s=%s" % (name, directory)]
+    for docs, sources in ctx.attr.mirrors.items():
+        flags += ["--mirror", "%s=%s" % (docs, sources)]
+    for doc in ctx.attr.exclude:
+        flags += ["--exclude", doc]
+    words = [shell.quote(f) for f in flags]
+    data = ""
+    if ctx.attr.data:
+        data = 'data="$(readlink -f "$TEST_SRCDIR/_main/%s")"\n' % ctx.file.data.short_path
+        words += ["--data", '"$data"']
+    script = ctx.actions.declare_file(ctx.label.name + ".sh")
+    ctx.actions.write(script, _DOCREFS_TEST.format(python = python.short_path, tool = ctx.file.tool.short_path,
+                                                   anchor = ctx.file.anchor.short_path, data = data,
+                                                   flags = " ".join(words)), is_executable = True)
+    files = [ctx.file.anchor, ctx.file.tool, python] + ctx.files.data
+    runfiles = ctx.runfiles(files = files).merge(runtime.default_runfiles)
+    return [DefaultInfo(executable = script, runfiles = runfiles)]
+
+_docrefs_test = rule(
+    implementation = _docrefs_test_impl,
+    test = True,
+    attrs = {
+        "lock": attr.string(mandatory = True, doc = "the lock's path in the checkout"),
+        "packages": attr.string_dict(doc = "the package roots a dotted name in code font resolves under: each name -> " +
+                                           "the directory it imports from (\"\" for the root)"),
+        "mirrors": attr.string_dict(doc = "the mirror rules, in order: a doc under the key's prefix mirrors the source " +
+                                          "at the value's prefix and the doc's stem"),
+        "exclude": attr.string_list(doc = "docs never read: a ledger whose rows describe the tree at their commit"),
+        "data": attr.label(allow_single_file = True, doc = "the pinned data's root file (a data repository's " +
+                                                           "`:root`): `data:` citations resolve in its directory"),
+        "python": attr.label(mandatory = True, allow_files = True, doc = "the interpreter: an environment's " +
+                                                                         "`:python`, or an executable that runs one"),
+        "anchor": attr.label(mandatory = True, allow_single_file = True, doc = "the workspace's MODULE.bazel"),
+        "tool": attr.label(mandatory = True, allow_single_file = True, doc = "the tool: the environment extension's " +
+                                                                           "`docrefs` repository's `:docrefs.py`"),
+    },
+)
+
+def docrefs_test(name, **kwargs):
+    """THE DOC REFERENCES of a repository (`fsla_devtools.docrefs`): every citation its docs make of its tree pinned to
+    the content it was read against, in the lock it names. A check of the checkout -- its tracked files and their
+    history -- so it runs there, outside the sandbox, never cached; `bazel run` of it takes the tool's commands."""
+    _docrefs_test(name = name, tags = ["external", "local"], **kwargs)
 
 _TOOL_RUN = """\
 #!/bin/bash

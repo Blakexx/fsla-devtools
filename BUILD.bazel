@@ -2,7 +2,7 @@
 package's project file and the files its install reads), and this workspace's own checks and gate."""
 
 load("//bazel:rules.bzl", "bazel_version_test")
-load("//bazel:workspace.bzl", "tree_part", "tree_test")
+load("//bazel:workspace.bzl", "docrefs_test", "tree_part", "tree_test")
 
 exports_files([
     "LICENSE",
@@ -63,12 +63,21 @@ tree_test(
     git = True,
 )
 
+#: every citation the README makes of the tree pinned and read (fsla_devtools.docrefs, this workspace's own)
+docrefs_test(
+    name = "docrefs",
+    size = "small",
+    lock = "references.lock.json",
+    packages = {"fsla_devtools": "", "tests": ""},
+)
+
 #: THE GATE: every check this workspace holds; the commit hook runs it (.githooks/pre-commit)
 test_suite(
     name = "gate",
     tests = [
         ":bazelversion",
         ":declarations",
+        ":docrefs",
         ":ruff",
         ":ruff_e3",
         ":tests",

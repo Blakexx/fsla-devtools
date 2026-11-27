@@ -5,8 +5,9 @@ carry it. It is a development dependency: nothing a user installs imports it.
 
 | Module | What it is |
 |---|---|
-| `fsla_devtools.mirror` | the declarations (`.github/mirror/declarations.json`), their check and the private-shaped content the tripwire refuses, run by each repository's commit gate |
+| `fsla_devtools.mirror` | the declarations (`.github/declarations.json`), their check and the private-shaped content the tripwire refuses, run by each repository's commit gate |
 | `fsla_devtools.tripwire` | the content checks over a staged diff or a pushed range, run by each repository's pre-commit and pre-push hooks |
+| `fsla_devtools.docrefs` | the doc references: every citation a repository's docs make of its tree pinned to the content it was read against, run by each repository's `docrefs_test` |
 | `fsla_devtools.cells` | the central cell registry: every input an FSLA measurement or test runs on (carry, layer, producer, QKV), its draw, its seed and the regime it proves, named once; bases and the cells derived from them; each cell's DESCRIPTION (its record and the digest of the code that draws it), a Bazel target (`@<cells>//:<cell>`) or a build NODE's output |
 | `fsla_devtools.build` | the declared build system: targets declared by composable functions in files, keyed by what they read, cached or run in dependency order, holding the machine's resources, each in its own environment's worker |
 | `fsla_devtools.timing` | the timing system: the session program a Bazel run target starts (`fsla_devtools.timing.session`: interleaved, clock-locked, stored) and its entry workers; and, as targets of the declared build system, a server of entry workers, registrations of timed callables on cells, sessions, memory passes, null gates |
@@ -24,8 +25,8 @@ environment extension, generic rules and measurement rules (below).
 
 ## The declarations and the tripwire
 
-Every FSLA repository is developed in public, with its whole history. `.github/mirror/declarations.json` in a repository
-declares every tracked path (`ships` and `private` list path prefixes; a path takes the longest entry it falls under),
+Every FSLA repository is developed in public, with its whole history. `.github/declarations.json` in a repository
+declares every tracked path (`ships` lists path prefixes; a path is declared when it is an entry or falls under one),
 and `python -m fsla_devtools.mirror --check` refuses a tracked path under no entry, at commit time. Its other fields are
 the tripwire's own: `allow` names shapes the repository's files may carry, each with its reason, `emails` the addresses
 a file may carry (the author's), and `agent_files` whether `.claude/` and `CLAUDE.md` are refused at any depth (default
@@ -39,11 +40,56 @@ never be allowed. Every pattern is spelled so that the tool's own text does not 
 refused. The checks run over the lines a change adds, so a violation is refused before it is history:
 `python -m fsla_devtools.tripwire --staged` in the pre-commit hook, `--range A..B` (any `git log` revisions) in the
 pre-push hook, over every commit patch by patch, so a secret added and removed inside the push still refuses it; `--tree`
-reads HEAD whole. A refusal is a line `TRIPWIRE REFUSED: path:line: the check`. Files declared `private` are not read.
+reads HEAD whole. A refusal is a line `TRIPWIRE REFUSED: path:line: the check`.
 
 ```bash
 python -m fsla_devtools.mirror --check       # every tracked path declared
 ```
+
+## The doc references
+
+A doc that cites the tree is a claim about it; `fsla_devtools.docrefs` pins each citation to the content it was last
+read against, so a change to the cited code shows as the docs it makes stale. A REFERENCE is a citation in code font or
+a link: `fsla_devtools/mirror.py`'s `scan`, a dotted name whose first component is one of the repository's package
+roots (`fsla_devtools.docrefs.verdict`), a path (`fsla_devtools/tripwire.py`), a path into the pinned data (the path
+prefixed "data:"), or a markdown link ([the gate](#tests-and-the-gate)); a fenced block cites nothing. Its TARGET
+is a Python function, method, class or constant (read by `ast`, following re-exports), a C++/CUDA function or
+`//: @ref NAME` ... `//: @end` region, a markdown section (its heading to the next at its level or above), or a whole
+file or directory, checked only to exist. A target is hashed normalized -- Python through `ast.unparse` with its
+docstrings dropped, the rest with comments dropped and whitespace collapsed -- so a reformat or a comment edit moves
+no pin.
+
+The lock holds one pin per (doc, target): the digest, the commit it was pinned at, and whether a docs pass has read it.
+The gate fails on any reference not clean: one the lock does not hold, one whose target changed or vanished (PENDING),
+one never read, one that resolves to nothing, and a pin no doc makes any more. Each line names the citing doc:line and
+the target, and the run ends with the one command that re-pins once the sentence has been read against the target. The
+lock records the interpreter's version, since `ast.unparse` moves between versions; a run under another is refused.
+
+```bash
+bazel test //:docrefs                        # the gate
+bazel run //:docrefs -- pending              # each pending target, its citing docs, and its change since the pin
+bazel run //:docrefs -- accept DOC...        # pin DOC's new and changed references, after reading them
+bazel run //:docrefs -- accept --whole DOC   # every reference in DOC was read
+bazel run //:docrefs -- prune                # drop the pins no doc makes
+bazel run //:docrefs -- init                 # pin today's references, unread; refused when a lock exists
+bazel run //:docrefs -- move OLD NEW         # a path moved: citations and pins follow, refused unless the content is the same
+```
+
+A repository turns it on with a `docrefs_test` (`bazel/rules.bzl`), whose attributes are its configuration:
+
+| Attribute | What it is |
+|---|---|
+| `lock` | the lock's path in the checkout |
+| `packages` | the package roots a dotted name resolves under, each to the directory it imports from (`""` for the root) |
+| `mirrors` | MIRROR RULES, in order: a doc under the key's prefix describes the source at the value's prefix and the doc's stem (`docs/internals/` -> `csrc/src/`: `docs/internals/a/b.md` mirrors `csrc/src/a/b.cu`), and on it a bare name in code font cites that source's primitive |
+| `exclude` | docs never read: a ledger whose rows describe the tree at their commit |
+| `data` | the pinned data's `:root` (the environment extension's `data` tag): a citation of the pinned data resolves in it |
+| `python` | the interpreter: an environment's `:python`, or an executable that runs one |
+| `tool` | the tool: the environment extension's `docrefs` repository's `:docrefs.py` |
+| `anchor` | the workspace's `MODULE.bazel` |
+
+The test runs in the checkout, outside the sandbox and never cached: its input is the tracked tree and its history.
+This repository's own (`//:docrefs`, in the gate) pins this README's citations in `references.lock.json`.
 
 ## The declared build system
 
@@ -315,11 +361,12 @@ first trims the repository cache's unused downloads when a trim is due. `bazel -
 | `tree` | the checkout's tracked files (`git ls-files`; the commit's index under the commit gate) |
 | `data` | the data repository at one commit (`remote`, `commit`, the `sha256` of the commit's archive): its `records/` and `lab/`, as `:records`, `:lab`, each file by its path, and `:root` (its BUILD file, which names the root) (`bazel/data.BUILD`), nothing of its own graph -- what a workspace's citations and readers take, fixed content at the pin |
 | `cells` | every central cell's description as a target (`@<name>//:<cell>`, a `cell` of `bazel/measure.bzl`), generated from this module's registry on the machine's `python3` |
+| `docrefs` | the doc references' tool as `@<name>//:docrefs.py`, a copy of `fsla_devtools/docrefs.py` a workspace's `docrefs_test` runs ([below](#the-doc-references)) |
 
 `python`, `pinned`, `cuda_toolkit` and `data` are REPRODUCIBLE repositories (`repo_metadata(reproducible = True)`: their result
 is fixed by their pins and the files they read), so Bazel unpacks each once into the repo contents cache
-(`host.build_cache`'s `repository/contents`) and every checkout's output base links it; `host_cc`, `host_gpu`, `tree`
-and `cells` read the machine or the workspace and are made per checkout.
+(`host.build_cache`'s `repository/contents`) and every checkout's output base links it; `host_cc`, `host_gpu` and `tree`
+read the machine or the workspace, `cells` and `docrefs` are made from this module's source, and each is made per checkout.
 
 **The environment store is bounded.** `host.store_max_gb` and `host.store_max_age_days` (the dev config) bound the store
 the `python` tag builds into: each environment build sweeps, under the store's lock, the environments idle past the age
@@ -341,8 +388,9 @@ a workspace whose file differs from `pins/bazel_version`, the Bazel release the 
 in its gate. A `pinned` tag fetches a `.tar.gz`, a `.tar.xz`, a wheel or a bare binary by its pin.
 
 **The generic rules** (`bazel/rules.bzl`): a check over the tracked tree (`tree_test`), a check of the commit
-(`checkout_test`), a tree tool as a test (`tool_test`) or a run target (`tool_run`), a package's part of the tree
-(`tree_part`), the pytest tiers (`pytest_tier`, `device_lane`) and the Bazel release check (`bazel_version_test`). Each takes the workspace's environment as an
+(`checkout_test`), the doc references ([`docrefs_test`](#the-doc-references)), a tree tool as a test (`tool_test`) or a
+run target (`tool_run`), a package's part of the tree (`tree_part`), the pytest tiers (`pytest_tier`, `device_lane`)
+and the Bazel release check (`bazel_version_test`). Each takes the workspace's environment as an
 argument; a workspace wraps them once with its own. A check over the tree or a tier that reads another repository's
 files names it in `repos` (a label of it -> a variable): its files join the runfiles and its root is exported as that
 variable (`{"@fsla_data//:lab": "FSLA_DATA"}`, the pinned data). **The results store's rules** (`bazel/results.bzl`): the records'
@@ -407,7 +455,8 @@ nothing else of a cache is deleted. Null `host.downloads_max_age_days` trims not
 bazel test //:gate
 ```
 
-The gate is ruff, its blank-line family, the tests, the declaration check and the Bazel release check, on the graph's own environment.
+The gate is ruff, its blank-line family, the tests, the declaration check, the Bazel release check and the doc
+references, on the graph's own environment.
 The commit gate (`.githooks/pre-commit` -> `bazel/bazel --commit-gate`, every FSLA repository's hook) runs `//:gate` on
 the commit as git will write it: the changes not staged set aside, the tree the commit's index.
 

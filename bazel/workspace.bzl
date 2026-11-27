@@ -3,11 +3,16 @@ environment and tree. Never loaded by a workspace depending on the module, which
 
 load("@devtools_env//:flags.bzl", "VENV")
 load("@devtools_tree//:tree.bzl", "TRACKED")
-load(":rules.bzl", _tree_part = "tree_part", _tree_test = "tree_test")
+load(":rules.bzl", _docrefs_test = "docrefs_test", _tree_part = "tree_part", _tree_test = "tree_test")
 
 def tree_test(**kwargs):
     """A check over the tree's tracked files, the environment's tools on PATH."""
     _tree_test(venv = VENV, **kwargs)
+
+def docrefs_test(**kwargs):
+    """The doc references, on the environment's interpreter, in this checkout."""
+    _docrefs_test(python = Label("@devtools_env//:python"), tool = Label("//:fsla_devtools/docrefs.py"),
+                  anchor = Label("//:MODULE.bazel"), **kwargs)
 
 def tree_part(parts = {}):
     """This package's part of the tree: `tracked` and `tracked_python`."""

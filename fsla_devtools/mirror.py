@@ -1,6 +1,6 @@
-"""THE DECLARATIONS AND THE CHECKS' SHAPES: a repository's `.github/mirror/declarations.json` (its path declarations and
-the private-shaped content its files may carry) and the shapes the tripwire (`fsla_devtools.tripwire`) refuses in a
-public repository.
+"""THE DECLARATIONS AND THE CHECKS' SHAPES: a repository's `.github/declarations.json` (the paths it ships and the
+private-shaped content its files may carry) and the shapes the tripwire (`fsla_devtools.tripwire`) refuses in a public
+repository.
 
     python -m fsla_devtools.mirror --check      every tracked path is declared; exit 1 naming the ones that are not
 
@@ -14,8 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-#: where a repository declares what it publishes, relative to its root
-DECLARATIONS = Path(".github") / "mirror" / "declarations.json"
+#: where a repository declares what it ships, relative to its root
+DECLARATIONS = Path(".github") / "declarations.json"
 
 #: agent and scratch files, refused at any depth. `.claude/` and `CLAUDE.md` are refused only where the repository's
 #: declarations keep them private (`agent_files`, on by default: the paper keeps it on); `SCRATCHPAD.md` is always refused
@@ -41,9 +41,9 @@ PRIVATE_SHAPES = {
 NEVER_ALLOWED = ("a credential",)
 #: addresses that are not a person's: loopback and the documentation ranges
 _NOT_AN_ADDRESS = re.compile(r"^(?:0[.]0[.]0[.]0|127[.].*|192[.]0[.]2[.].*|198[.]51[.]100[.].*|203[.]0[.]113[.].*)$")
-#: the optional declarations: `public` (the repository's own name, read by nothing), `agent_files` (bool, default true:
-#: `.claude/` and `CLAUDE.md` stay private) and `emails` (the addresses a published file may carry: the author's)
-OPTIONAL = {"public": "", "agent_files": True, "emails": []}
+#: the optional declarations: `agent_files` (bool, default true: `.claude/` and `CLAUDE.md` are refused) and `emails`
+#: (the addresses a published file may carry: the author's)
+OPTIONAL = {"agent_files": True, "emails": []}
 
 
 def root() -> Path:
@@ -57,10 +57,9 @@ def root() -> Path:
 def declarations(path: Path | None = None) -> dict:
     path = path or root() / DECLARATIONS
     blob = json.loads(path.read_text())
-    required = {"ships", "private", "allow"}
+    required = {"ships", "allow"}
     if not required <= set(blob) or set(blob) - required - set(OPTIONAL):
-        raise SystemExit(f"{path}: fields must be ships, private, allow and optionally {sorted(OPTIONAL)}; "
-                         f"got {sorted(blob)}")
+        raise SystemExit(f"{path}: fields must be ships, allow and optionally {sorted(OPTIONAL)}; got {sorted(blob)}")
     for key, default in OPTIONAL.items():
         blob.setdefault(key, default)
     unknown = set(blob["allow"]) - set(PRIVATE_SHAPES)
@@ -70,11 +69,9 @@ def declarations(path: Path | None = None) -> dict:
     return blob
 
 
-def declaration(path: str, decl: dict) -> str | None:
-    """"ships" or "private" by the longest entry `path` falls under; None when it falls under none."""
-    matches = [(len(entry), kind) for kind in ("ships", "private") for entry in decl[kind]
-               if path == entry or path.startswith(entry.rstrip("/") + "/")]
-    return max(matches)[1] if matches else None
+def declared(path: str, decl: dict) -> bool:
+    """Whether `path` is a `ships` entry or falls under one."""
+    return any(path == entry or path.startswith(entry.rstrip("/") + "/") for entry in decl["ships"])
 
 
 def _git(*args: str) -> bytes:
@@ -82,13 +79,13 @@ def _git(*args: str) -> bytes:
 
 
 def undeclared(paths: list[str], decl: dict) -> list[str]:
-    return [p for p in paths if declaration(p, decl) is None]
+    return [p for p in paths if not declared(p, decl)]
 
 
 def scan(name: str, lines: list[tuple[int, str]], decl: dict) -> list[str]:
     """The refusals for one file's `name` and its `lines` (line number, text; a diff's added lines are enough): the
-    agent-file rule where the declarations keep agent files private, then each private-shaped string the declarations do
-    not allow, at its first line."""
+    agent-file rule where the declarations refuse agent files, then each private-shaped string the declarations do not
+    allow, at its first line."""
     if SCRATCH_FILES.search(name) or (decl["agent_files"] and AGENT_FILES.search(name)):
         return [f"{name}: an agent file"]
     findings = []
@@ -113,9 +110,8 @@ def whole(text: str) -> list[tuple[int, str]]:
 
 
 def scan_files(files: dict[str, list[tuple[int, str]]], decl: dict) -> list[str]:
-    """The tripwire over a set of files (path to numbered lines): the files declared private are not scanned."""
-    return [f for name, lines in sorted(files.items()) if declaration(name, decl) != "private"
-            for f in scan(name, lines, decl)]
+    """The tripwire over a set of files (path to numbered lines)."""
+    return [f for name, lines in sorted(files.items()) for f in scan(name, lines, decl)]
 
 
 def added_lines(diff: str) -> dict[str, list[tuple[int, str]]]:
@@ -155,7 +151,7 @@ def range_diff(revisions: list[str]) -> str:
 def main(argv: list[str]) -> int:
     decl = declarations()
     if argv == ["--check"]:
-        refusals = [f"{p}: tracked but declared neither ships nor private"
+        refusals = [f"{p}: tracked but under no `ships` entry"
                     for p in undeclared([p for p in _git("ls-files", "-z").decode().split("\0") if p], decl)]
     else:
         raise SystemExit(__doc__)

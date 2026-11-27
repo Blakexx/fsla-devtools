@@ -35,8 +35,7 @@ CLEAN = ("version = '1.2.3'\npin = 'tool==13.0.3.0'  # nvcc \u00a74.2.9.1, /modu
 
 
 def declared(**more) -> dict:
-    return {"public": "o/r", "ships": ["src", "README.md", ".claude", "CLAUDE.md"], "private": ["private"], "allow": {},
-            **more}
+    return {"ships": ["src", "README.md", ".claude", "CLAUDE.md"], "allow": {}, **more}
 
 
 class Tripwire(unittest.TestCase):
@@ -45,7 +44,7 @@ class Tripwire(unittest.TestCase):
         self.repo = Path(self.tmp.name)
         self.cwd = os.getcwd()
         self.git("init", "-q", "-b", "main")
-        self.write(".github/mirror/declarations.json", json.dumps({**declared(), "emails": [AUTHOR]}))
+        self.write(".github/declarations.json", json.dumps({**declared(), "emails": [AUTHOR]}))
         self.write("README.md", "a repository\n")
         self.git("add", "-A")
         self.git("-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-q", "-m", "c")
@@ -83,9 +82,7 @@ class Tripwire(unittest.TestCase):
         self.git("add", "src/a.py")
         self.assertEqual(self.run_tripwire("--staged"), (0, ""))
 
-    def test_a_private_file_is_not_checked_and_an_unstaged_line_is_not_seen(self):
-        self.write("private/n.md", PLANTED[0][1])
-        self.git("add", "private/n.md")
+    def test_an_unstaged_line_is_not_seen(self):
         self.write("src/b.py", PLANTED[1][1])
         self.assertEqual(self.run_tripwire("--staged"), (0, ""))
 
@@ -115,7 +112,7 @@ class Tripwire(unittest.TestCase):
 
     def test_agent_files_are_the_repositorys_own_setting(self):
         for setting, expected in ((True, 1), (False, 0)):
-            self.write(".github/mirror/declarations.json", json.dumps({**declared(), "agent_files": setting}))
+            self.write(".github/declarations.json", json.dumps({**declared(), "agent_files": setting}))
             self.write("CLAUDE.md", "notes\n")
             self.write("sub/.claude/settings.json", "{}\n")
             self.git("add", "-A")
@@ -124,11 +121,11 @@ class Tripwire(unittest.TestCase):
         self.assertEqual(mirror.declarations()["agent_files"], False)
 
     def test_a_scratchpad_file_is_always_refused_and_an_unknown_field_is_not_a_declaration(self):
-        self.write(".github/mirror/declarations.json", json.dumps({**declared(), "agent_files": False}))
+        self.write(".github/declarations.json", json.dumps({**declared(), "agent_files": False}))
         self.write("src/SCRATCHPAD.md", "n\n")
         self.git("add", "-A")
         self.assertEqual(self.run_tripwire("--staged")[0], 1)
-        self.write(".github/mirror/declarations.json", json.dumps({**declared(), "agents": False}))
+        self.write(".github/declarations.json", json.dumps({**declared(), "agents": False}))
         with self.assertRaisesRegex(SystemExit, "fields must be"):
             mirror.declarations()
 

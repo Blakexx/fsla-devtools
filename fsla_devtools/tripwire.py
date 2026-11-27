@@ -8,8 +8,8 @@ commit or a push adds, so a violation is refused before it is history.
                                                         more than one argument is passed to `git log` as given
     python -m fsla_devtools.tripwire --tree             every tracked file of HEAD, whole
 
-Run from inside the repository, under its `.github/mirror/declarations.json`: files declared `private` are not checked,
-`allow` and `emails` and `agent_files` are the repository's own. Exit 1 on any refusal, each a line `path:line: shape`.
+Run from inside the repository, under its `.github/declarations.json`: `allow`, `emails` and `agent_files` are the
+repository's own. Exit 1 on any refusal, each a line `path:line: shape`.
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ def check(argv: list[str]) -> list[str]:
 def main(argv: list[str]) -> int:
     refusals = check(argv)
     for refusal in refusals:
-        print(f"TRIPWIRE REFUSED: {refusal} (.github/mirror/declarations.json)")
+        print(f"TRIPWIRE REFUSED: {refusal} ({mirror.DECLARATIONS})")
     return 1 if refusals else 0
 
 
