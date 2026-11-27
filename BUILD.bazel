@@ -2,7 +2,7 @@
 package's project file and the files its install reads), and this workspace's own checks and gate."""
 
 load("//bazel:rules.bzl", "bazel_version_test")
-load("//bazel:workspace.bzl", "docrefs_test", "tree_part", "tree_test")
+load("//bazel:workspace.bzl", "docrefs_test", "hermetic_test", "tree_part", "tree_test")
 
 exports_files([
     "LICENSE",
@@ -81,6 +81,24 @@ docrefs_test(
     packages = {"fsla_devtools": "", "tests": ""},
 )
 
+#: THE HERMETIC CHECK (bazel/hermetic.bzl, fsla_devtools.hermetic): the gate's checks and the measurement rules' own
+#: targets read whole, the lockfile, the settings and the repository rules, against the default allowlist
+hermetic_test(
+    name = "hermetic",
+    size = "small",
+    targets = [
+        ":bazelversion",
+        ":declarations",
+        ":docrefs",
+        ":ruff",
+        ":ruff_e3",
+        ":tests",
+        "//tests/rules:memory",
+        "//tests/rules:planted_test",
+        "//tests/rules:session",
+    ],
+)
+
 #: THE GATE: every check this workspace holds; the commit hook runs it (.githooks/pre-commit)
 test_suite(
     name = "gate",
@@ -88,6 +106,7 @@ test_suite(
         ":bazelversion",
         ":declarations",
         ":docrefs",
+        ":hermetic",
         ":ruff",
         ":ruff_e3",
         ":tests",

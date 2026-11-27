@@ -3,11 +3,16 @@ environment and tree. Never loaded by a workspace depending on the module, which
 
 load("@devtools_env//:flags.bzl", "VENV")
 load("@devtools_tree//:tree.bzl", "TRACKED")
+load(":hermetic.bzl", _hermetic_test = "hermetic_test")
 load(":rules.bzl", _docrefs_test = "docrefs_test", _tree_part = "tree_part", _tree_test = "tree_test")
 
 def tree_test(**kwargs):
     """A check over the tree's tracked files, the environment's tools on PATH."""
     _tree_test(venv = VENV, **kwargs)
+
+def hermetic_test(**kwargs):
+    """The hermetic rule's gate test over this workspace's actions, on the environment's interpreter."""
+    _hermetic_test(venv = VENV, **kwargs)
 
 def docrefs_test(**kwargs):
     """The doc references, on the environment's interpreter, in this checkout."""

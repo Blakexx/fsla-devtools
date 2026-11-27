@@ -75,6 +75,9 @@ class Verdict(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.tree = Path(self._tmp.name) / "tree"
         described = descriptions()
+        #: the sides' environment, this one, as an environment repository links it: its mark resolves to the venv
+        (self.tree / "env").mkdir(parents=True)
+        (self.tree / "env" / "venv").symlink_to(sys.prefix)
         for name in (ANTI, ONEHOT):
             path = self.tree / "cells" / f"{name}.json"
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,7 +96,7 @@ class Verdict(unittest.TestCase):
         path.write_text(json.dumps({
             "owner": f"//{bundle}:{name}", "kind": "side", "device": False, "executor": executor, "params": params or {},
             "binds": list(binds), "cells": [f"cells/{c}.json" for c in names],
-            "bundle": {"root": bundle, "manifest": f"{bundle}/bundle.json", "python": sys.executable}}))
+            "bundle": {"root": bundle, "manifest": f"{bundle}/bundle.json", "venv": "env/venv/.complete"}}))
         return path
 
     def run_verdict(self, left: Path, right: Path, strategy: str = "bit-identical", params=None, **claim) -> dict:

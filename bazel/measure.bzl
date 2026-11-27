@@ -49,6 +49,7 @@ twin's.
 """
 
 load("@bazel_skylib//lib:shell.bzl", "shell")
+load(":rules.bzl", "VENV_ATTR", "environment")
 
 CellInfo = provider(
     doc = "A cell's description: its record (provider, parameters, seed) and the digest of the code that draws it.",
@@ -60,7 +61,7 @@ TimingBundleInfo = provider(
     fields = {
         "root": "the bundle's root, the runfiles directory of the workspace that built it",
         "manifest": "its `bundle.json`",
-        "python": "the environment's interpreter its workers run on",
+        "venv": "the environment its workers run on: its completion mark's runfiles path, which resolves to the venv",
         "binds": "the modules a worker must load from inside it",
         "runfiles": "its files, its manifest among them",
     },
@@ -102,16 +103,16 @@ def digest(files):
 """
 
 #: THE BUNDLE MANIFEST'S ACTION: the workspace's stamp, the bundle's CONTENT DIGEST (every file by its path in the bundle)
-#: and its ENVIRONMENT (the store venv's key, its path's last part)
+#: and its ENVIRONMENT (the environment's key, its `environment.key`)
 _BUNDLE = _STAMP + """\
 ap = argparse.ArgumentParser(fromfile_prefix_chars="@")
 ap.add_argument("--status", type=pathlib.Path)
-ap.add_argument("--venv")
+ap.add_argument("--environment", type=pathlib.Path)
 ap.add_argument("--out", type=pathlib.Path)
 ap.add_argument("--file", nargs=2, action="append", default=[])
 a = ap.parse_args()
 a.out.write_text(json.dumps({"stamp": stamp(a.status), "digest": digest(a.file), "files": len(a.file),
-                             "environment": pathlib.PurePath(a.venv).name}, indent=1, sort_keys=True) + "\\n")
+                             "environment": a.environment.read_text().strip()}, indent=1, sort_keys=True) + "\\n")
 """
 
 #: THE STAMP ALONE: the workspace's stamp as a file, for a program that stores what it measured itself (a lab's run)
@@ -193,6 +194,8 @@ def _timing_bundle_impl(ctx):
         [d[DefaultInfo].default_runfiles for d in ctx.attr.data],
     )
     root = ctx.label.workspace_name or ctx.workspace_name
+    mark, env = environment(ctx)
+    keys = [f for f in env if f.basename == "environment.key"]
 
     #: THE BUNDLE'S MANIFEST: the workspace's stamp (a failed status command fails the build) and the content digest
     manifest = ctx.actions.declare_file(ctx.label.name + ".bundle.json")
@@ -206,20 +209,20 @@ def _timing_bundle_impl(ctx):
     args = ctx.actions.args()
     args.add_all(["-I", "-c", _BUNDLE])
     args.add("--status", ctx.info_file)
-    args.add("--venv", ctx.attr.venv)
+    args.add("--environment", keys[0])
     args.add("--out", manifest)
     ctx.actions.run(
         executable = ctx.file.python,
         arguments = [args, files],
-        inputs = depset([ctx.info_file] + laid_out.values(), transitive = [runfiles.files]),
+        inputs = depset([ctx.info_file] + keys + laid_out.values(), transitive = [runfiles.files]),
         outputs = [manifest],
         mnemonic = "TimingBundle",
         progress_message = "Stamping and digesting %{label}'s bundle",
     )
     return [
         DefaultInfo(files = depset([manifest])),
-        TimingBundleInfo(root = root, manifest = manifest, python = ctx.attr.venv + "/bin/python3",
-                         binds = ctx.attr.binds, runfiles = runfiles.merge(ctx.runfiles(files = [manifest]))),
+        TimingBundleInfo(root = root, manifest = manifest, venv = _rlocation(ctx, mark), binds = ctx.attr.binds,
+                         runfiles = runfiles.merge(ctx.runfiles(files = [manifest] + env))),
     ]
 
 timing_bundle = rule(
@@ -229,7 +232,7 @@ timing_bundle = rule(
         "layout": attr.label_keyed_string_dict(allow_files = True, doc = "a file laid out at a path of the bundle, where " +
                                                                          "its code reads it"),
         "binds": attr.string_list(doc = "modules a worker must load from inside the bundle, each checked after set-up"),
-        "venv": attr.string(mandatory = True, doc = "the environment's store venv, whose interpreter the workers run on"),
+        "venv": VENV_ATTR,
         "python": attr.label(mandatory = True, allow_single_file = True, cfg = "exec", doc = "the environment's base " +
                                                                                              "interpreter, for the manifest"),
     },
@@ -237,7 +240,7 @@ timing_bundle = rule(
           "the stamped commit, the content digest, the environment), digested once for every entry over it.",
 )
 
-def _description(owner, kind, device, executor, params, binds, cells, root, manifest, python, source = None):
+def _description(owner, kind, device, executor, params, binds, cells, root, manifest, venv, source = None):
     blob = {
         "owner": owner,
         "kind": kind,
@@ -245,7 +248,7 @@ def _description(owner, kind, device, executor, params, binds, cells, root, mani
         "params": params,
         "binds": binds,
         "cells": cells,
-        "bundle": {"root": root, "manifest": manifest, "python": python},
+        "bundle": {"root": root, "manifest": manifest, "venv": venv},
     }
     if kind == "side":
         blob["device"] = device
@@ -272,7 +275,7 @@ def _timing_entry_impl(ctx):
         [_rlocation(ctx, c) for c in cells],
         bundle.root,
         _rlocation(ctx, bundle.manifest),
-        bundle.python,
+        bundle.venv,
     ))
     runfiles = bundle.runfiles.merge(ctx.runfiles(files = [description] + cells))
     return [
@@ -318,7 +321,7 @@ def _exported_entry_impl(ctx):
         [here + c for c in ctx.attr.cells],
         here + ctx.attr.root,
         here + ctx.attr.manifest,
-        ctx.attr.python,
+        here + ctx.attr.venv,
         source = ctx.attr.source,
     ))
     runfiles = ctx.runfiles(files = [description], transitive_files = depset(ctx.files.tree))
@@ -340,7 +343,8 @@ exported_entry = rule(
         "cells": attr.string_list(doc = "its cells' descriptions, by their paths in this repository"),
         "root": attr.string(mandatory = True, doc = "the bundle's root, by its path in this repository"),
         "manifest": attr.string(mandatory = True, doc = "the bundle's manifest, by its path in this repository"),
-        "python": attr.string(mandatory = True, doc = "the bundle's environment's interpreter"),
+        "venv": attr.string(mandatory = True, doc = "the bundle's environment: its completion mark, by its path in this " +
+                                                    "repository (the bundle tag's link to the store venv)"),
         "tree": attr.label(mandatory = True, allow_files = True, doc = "the bundle's files, as the workspace built them"),
     },
     doc = "A timing entry, clock reader or side BUILT IN ANOTHER WORKSPACE, by its own commit's pins (the environment " +
@@ -353,16 +357,18 @@ _SESSION = """\
 # store; each entry's worker runs on its bundle's interpreter, its bundle its whole import path
 set -euo pipefail
 runfiles="${{RUNFILES_DIR:-$(realpath -s "$0").runfiles}}"
-exec {python} -P -m fsla_devtools.timing.session --runfiles "$runfiles" --manifest {manifest} "$@"
+venv="$(dirname "$(readlink -f "$runfiles/{venv}")")"
+exec "$venv/bin/python3" -P -m fsla_devtools.timing.session --runfiles "$runfiles" --manifest {manifest} "$@"
 """
 
 def _session_target(ctx, manifest_fields, members, rule_name):
     manifest = ctx.actions.declare_file(ctx.label.name + ".session.json")
     ctx.actions.write(manifest, json.encode_indent(manifest_fields) + "\n")
     launcher = ctx.actions.declare_file(ctx.label.name + ".sh")
-    ctx.actions.write(launcher, _SESSION.format(rule = rule_name, python = shell.quote(ctx.attr.venv + "/bin/python3"),
+    mark, env = environment(ctx)
+    ctx.actions.write(launcher, _SESSION.format(rule = rule_name, venv = _rlocation(ctx, mark),
                                                 manifest = shell.quote(_rlocation(ctx, manifest))), is_executable = True)
-    runfiles = ctx.runfiles(files = [manifest]).merge_all([m[TimingEntryInfo].runfiles for m in members])
+    runfiles = ctx.runfiles(files = [manifest] + env).merge_all([m[TimingEntryInfo].runfiles for m in members])
     return [DefaultInfo(executable = launcher, files = depset([manifest]), runfiles = runfiles)]
 
 def _timed_only(ctx, entries):
@@ -406,7 +412,7 @@ interleaved_timing = rule(
                                      "ratios put one outside their interquartile range"),
         "workspace": _WORKSPACE,
         "claim": attr.string(doc = "what the session claims of itself; `unlocked` admits a host with no clock lock"),
-        "venv": attr.string(mandatory = True, doc = "the environment's store venv, whose interpreter runs the program"),
+        "venv": VENV_ATTR,
     },
     doc = "An interleaved timing session over entries, or their null gate: `bazel run` measures and stores it " +
           "(`-- --no-store`, `--scratch DIR`, `--store-root DIR`).",
@@ -429,7 +435,7 @@ measure_memory = rule(
         "entries": attr.label_list(mandatory = True, providers = [TimingEntryInfo], doc = "the timed entries"),
         "calls": attr.int(default = 5, doc = "the calls each member's peak is read over"),
         "workspace": _WORKSPACE,
-        "venv": attr.string(mandatory = True, doc = "the environment's store venv, whose interpreter runs the program"),
+        "venv": VENV_ATTR,
     },
     doc = "A MEMORY PASS over entries: each member alone, the caching allocator's peak over its calls and what it holds " +
           "outside it; `bazel run` measures and stores it.",
@@ -459,9 +465,13 @@ def _tree_path(f):
 def _tree_entry(f):
     return [_tree_path(f), f.path]
 
-def _instrument(ctx, tool, args, files, placed, inputs, devices, venv):
+def _instrument(ctx, tool, args, files, placed, inputs, devices):
     """An instrument's providers: on the device, what its store target or test runs; else the action that runs it."""
     name = ctx.label.name + ".json"
+    #: the environment it runs on: its key is an input of the output, as its files are of the tree
+    mark, env = environment(ctx)
+    files = depset(env, transitive = [files])
+    inputs = inputs + [(_owner(ctx.attr.venv.label), depset(env))]
     if devices:
         inputs = inputs + [(_owner(devices.label), devices.files)]
 
@@ -486,14 +496,15 @@ def _instrument(ctx, tool, args, files, placed, inputs, devices, venv):
     run.add("--")
     run.add_all(args)
     ctx.actions.run(
-        executable = venv + "/bin/python3",
+        #: the store venv's interpreter by its execution-root path, through the environment repository's link
+        executable = mark.dirname + "/bin/python3",
         arguments = [run],
         inputs = depset([files_list] + [f for _path, f in placed], transitive = [files]),
         outputs = [output],
         mnemonic = "Instrument",
         progress_message = "Running %{label}'s tool",
-        #: the environment's interpreter reads its packages from the store, which the sandbox does not hold; its store
-        #: path on the command line keys the action by the environment
+        #: the environment's interpreter reads its packages from the store, which the sandbox does not hold; the
+        #: environment's key, an input, keys the action by it
         execution_requirements = {"no-sandbox": "1"},
     )
     return [DefaultInfo(files = depset([output])), InstrumentInfo(tool = _tree_path(tool), args = args, files = files,
@@ -504,7 +515,7 @@ def _instrument_impl(ctx):
     targets = [ctx.attr.tool] + ctx.attr.data
     args = [ctx.expand_location(a, targets) for a in ctx.attr.arguments]
     return _instrument(ctx, ctx.file.tool, args, depset([ctx.file.tool] + ctx.files.data), [],
-                       [(_owner(t.label), t.files) for t in targets], ctx.attr.devices, ctx.attr.venv)
+                       [(_owner(t.label), t.files) for t in targets], ctx.attr.devices)
 
 instrument = rule(
     implementation = _instrument_impl,
@@ -516,7 +527,7 @@ instrument = rule(
         "data": attr.label_list(allow_files = True, doc = "the files it reads, laid out at their paths in its tree"),
         "devices": attr.label(allow_single_file = True, doc = "an instrument on the device: the devices' identity, an " +
                                                               "input of its record; its store target runs it"),
-        "venv": attr.string(mandatory = True, doc = "the environment's store venv, whose interpreter runs the tool"),
+        "venv": VENV_ATTR,
     },
     doc = "A tool's JSON over the files it reads: a build output, or, on the device, what its store target runs. A tool " +
           "that cannot run writes `{\"refused\": WHY}` and exits 0; one that fails fails.",
@@ -559,9 +570,6 @@ def _diff_verdict_impl(ctx):
         str(ctx.attr.minimum),
         "--threads",
         str(ctx.attr.threads),
-        #: the comparison's code is the environment's fsla_devtools: its name keys the record, as its path keys the action
-        "--environment",
-        ctx.attr.venv.rstrip("/").split("/")[-1],
     ]
     placed = {}
     for path, f in _runfiles_placed(ctx, left.runfiles) + _runfiles_placed(ctx, right.runfiles):
@@ -572,7 +580,7 @@ def _diff_verdict_impl(ctx):
     return _instrument(ctx, tool, args, depset([tool]), placed.items(), [
         (left.owner, left.runfiles.files),
         (right.owner, right.runfiles.files),
-    ], devices, ctx.attr.venv)
+    ], devices)
 
 _diff_verdict = rule(
     implementation = _diff_verdict_impl,
@@ -586,7 +594,7 @@ _diff_verdict = rule(
         "minimum": attr.int(default = 1, doc = "the quantities it must compare for its verdict to mean anything"),
         "threads": attr.int(default = 4, doc = "the torch threads each side runs on: a job's share of the host"),
         "devices": attr.label(allow_single_file = True, doc = "the devices' identity, for a side on the device"),
-        "venv": attr.string(mandatory = True, doc = "the environment's store venv, whose interpreter compares"),
+        "venv": VENV_ATTR,
     },
     doc = "THE DIFF of two sides under one rule (fsla_devtools.diff.verdict): each side produced on its bundle's " +
           "interpreter, the two compared cell by cell, the verdict JSON whether the claim held. An instrument: an " +
@@ -602,7 +610,8 @@ _DIFF_TEST = """\
 # a diff's gate (fsla_devtools' diff_test): its verdict read, or, over a side on the device, run now
 set -euo pipefail
 runfiles="${{RUNFILES_DIR:-$(realpath -s "$0").runfiles}}"
-exec {python} -I -m fsla_devtools.diff.verdict --check --runfiles "$runfiles" --spec {spec}
+venv="$(dirname "$(readlink -f "$runfiles/{venv}")")"
+exec "$venv/bin/python3" -I -m fsla_devtools.diff.verdict --check --runfiles "$runfiles" --spec {spec}
 """
 
 def _diff_test_impl(ctx):
@@ -619,10 +628,11 @@ def _diff_test_impl(ctx):
                  [[path, _rlocation(ctx, f)] for path, f in instrument.placed],
     }) + "\n")
     launcher = ctx.actions.declare_file(ctx.label.name + ".sh")
-    ctx.actions.write(launcher, _DIFF_TEST.format(python = shell.quote(ctx.attr.venv + "/bin/python3"),
+    mark, env = environment(ctx)
+    ctx.actions.write(launcher, _DIFF_TEST.format(venv = _rlocation(ctx, mark),
                                                   spec = shell.quote(_rlocation(ctx, spec))), is_executable = True)
     carried = [instrument.output] if instrument.output else files + [f for _path, f in instrument.placed]
-    return [DefaultInfo(executable = launcher, runfiles = ctx.runfiles(files = [spec] + carried))]
+    return [DefaultInfo(executable = launcher, runfiles = ctx.runfiles(files = [spec] + carried + env))]
 
 diff_test = rule(
     implementation = _diff_test_impl,
@@ -631,7 +641,7 @@ diff_test = rule(
         "verdict": attr.label(mandatory = True, providers = [InstrumentInfo], doc = "a `diff_verdict`"),
         "on_difference": attr.string(default = "fail", values = ["fail", "record"], doc = "a claim not kept fails the " +
                                                                                          "test, or is printed and passes"),
-        "venv": attr.string(mandatory = True, doc = "the environment's store venv"),
+        "venv": VENV_ATTR,
     },
     doc = "A diff's gate: passes where the verdict's claim held (`on_difference = \"record\"`: always, the verdict " +
           "printed); over a side on the device it runs the verdict itself, in the test phase.",
@@ -665,7 +675,8 @@ _RECORD_RUN = """\
 # stores each output file unless its record already holds it (an instrument on the device runs first)
 set -euo pipefail
 runfiles="${{RUNFILES_DIR:-$(realpath -s "$0").runfiles}}"
-exec {python} -I -m fsla_devtools.record --runfiles "$runfiles" --record {record} "$@"
+venv="$(dirname "$(readlink -f "$runfiles/{venv}")")"
+exec "$venv/bin/python3" -I -m fsla_devtools.record --runfiles "$runfiles" --record {record} "$@"
 """
 
 def _results_store_impl(ctx):
@@ -720,10 +731,11 @@ def _results_store_impl(ctx):
         progress_message = "Stamping and digesting %{label}'s record",
     )
     launcher = ctx.actions.declare_file(ctx.label.name + ".sh")
-    ctx.actions.write(launcher, _RECORD_RUN.format(python = shell.quote(ctx.attr.venv + "/bin/python3"),
+    mark, env = environment(ctx)
+    ctx.actions.write(launcher, _RECORD_RUN.format(venv = _rlocation(ctx, mark),
                                                    record = shell.quote(_rlocation(ctx, record))), is_executable = True)
     return [DefaultInfo(executable = launcher, files = depset([record]),
-                        runfiles = ctx.runfiles(files = [record], transitive_files = carried))]
+                        runfiles = ctx.runfiles(files = [record] + env, transitive_files = carried))]
 
 results_store = rule(
     implementation = _results_store_impl,
@@ -733,7 +745,7 @@ results_store = rule(
         "workspace": _WORKSPACE,
         "inputs": attr.label_list(allow_files = True, doc = "what the output depends on, beyond an instrument's own: " +
                                                             "their files' digests key the record"),
-        "venv": attr.string(mandatory = True, doc = "the environment's store venv, whose interpreter runs the store"),
+        "venv": VENV_ATTR,
         "python": attr.label(mandatory = True, allow_single_file = True, cfg = "exec", doc = "the environment's base " +
                                                                                              "interpreter, for the record"),
     },

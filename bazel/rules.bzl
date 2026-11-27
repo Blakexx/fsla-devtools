@@ -2,24 +2,43 @@
 commit (`checkout_test`), the doc references (`docrefs_test`), a tree tool as a test (`tool_test`) or as a run target
 (`tool_run`), a package's part of the tree (`tree_part`), the pytest tiers (`pytest_tier`, `device_lane`) and the check
 of a workspace's Bazel release (`bazel_version_test`). A workspace's environment is its own (the
-environment extension's `python` tag), so each rule takes it as an argument: `venv`, the environment's store path from
-its `flags.bzl`, and `python`, its interpreter's label. A workspace wraps these once with its own environment.
+environment extension's `python` tag), so each rule takes it as an argument: `venv`, the environment by label (its
+`flags.bzl`'s `VENV`, the repository's `:venv`), and `python`, its interpreter's label. A workspace wraps these once with its own environment.
 """
 
 load("@bazel_skylib//lib:shell.bzl", "shell")
+
+#: THE ENVIRONMENT A SCRIPT OR AN ACTION RUNS ON, by label: the `venv` attribute of every rule that runs on one (an
+#: environment repository's `:venv`, `VENV` in its `flags.bzl`) -- its files the store venv's completion mark and the
+#: environment's key, so the key is an input of what runs on it and no command or script names the store's path
+VENV_ATTR = attr.label(mandatory = True, allow_files = True, doc = "the environment, by label (its `flags.bzl`'s `VENV`)")
+
+def environment(ctx, venv = None):
+    """The environment's completion mark (the file whose resolved directory is the store venv) and every file of it:
+    `venv`'s, a target, else the rule's `venv` attribute's."""
+    venv = venv or ctx.attr.venv
+    files = venv[DefaultInfo].files.to_list()
+    marks = [f for f in files if f.basename == ".complete"]
+    if len(marks) != 1:
+        fail("%s: %s is no environment's `:venv` (one completion mark)" % (ctx.label, venv.label))
+    return marks[0], files
+
+def venv_line(mark):
+    """The script's first line: `$venv`, the store venv, resolved from the mark's runfiles path -- relative to the
+    runfiles' workspace directory a test or a `bazel run` starts in, so it runs before the script moves."""
+    return 'venv="$(dirname "$(readlink -f %s)")"\n' % shell.quote(mark.short_path)
 
 _TREE_TEST = """\
 #!/bin/bash
 # a check over the tree's tracked files (fsla_devtools' tree_test): the runfiles copied into a real tree first, so a
 # tool that resolves a path -- the runfiles are links into the checkout -- reads the check's inputs and nothing else
 set -euo pipefail
-tree="$TEST_TMPDIR/tree"
+{venv}tree="$TEST_TMPDIR/tree"
 cp -rL "$TEST_SRCDIR/_main" "$tree"
 rm -f "$tree/$TEST_BINARY"
 cd "$tree"
-#: no machine reaches a check over files: the dev config is the defaults
-unset FSLA_DEV_CONFIG
-export PATH={venv}/bin:/usr/bin:/bin RUFF_NO_CACHE=true
+#: no machine reaches a check over files: no test is handed a dev config, so its reads are the defaults
+export PATH="$venv/bin:/usr/bin:/bin" RUFF_NO_CACHE=true
 {repos}{git}exec {cmd}
 """
 
@@ -39,10 +58,11 @@ def _repos(ctx):
 def _tree_test_impl(ctx):
     script = ctx.actions.declare_file(ctx.label.name + ".sh")
     repos, files = _repos(ctx)
-    body = _TREE_TEST.format(venv = shell.quote(ctx.attr.venv), git = _TREE_GIT if ctx.attr.git else "", repos = repos,
+    mark, env = environment(ctx)
+    body = _TREE_TEST.format(venv = venv_line(mark), git = _TREE_GIT if ctx.attr.git else "", repos = repos,
                              cmd = " ".join([shell.quote(w) for w in ctx.attr.cmd]))
     ctx.actions.write(script, body, is_executable = True)
-    return [DefaultInfo(executable = script, runfiles = ctx.runfiles(transitive_files = depset(ctx.files.data, transitive = files)))]
+    return [DefaultInfo(executable = script, runfiles = ctx.runfiles(transitive_files = depset(ctx.files.data + env, transitive = files)))]
 
 tree_test = rule(
     implementation = _tree_test_impl,
@@ -52,7 +72,7 @@ tree_test = rule(
         "data": attr.label_list(allow_files = True, doc = "the files it reads: the tree, or the part of it the check reads"),
         "git": attr.bool(default = False, doc = "the copy a git index of its files, for a check that asks git what is tracked"),
         "repos": attr.label_keyed_string_dict(allow_files = True, doc = _REPOS_DOC),
-        "venv": attr.string(mandatory = True, doc = "the environment's store venv, whose tools are on PATH"),
+        "venv": VENV_ATTR,
     },
     doc = "A check over the tree's tracked files, the environment's tools on PATH: one test, cached on what it reads.",
 )
@@ -91,10 +111,10 @@ tool_test = rule(
 _CHECKOUT_TEST = """\
 #!/bin/bash
 # a check of the commit, run in the checkout it is made from (fsla_devtools' checkout_test): never cached; the
-# machine's dev config is the one the front door names (FSLA_DEV_CONFIG)
+# machine's dev config is the one the front door linked into the checkout (its `.bazel/dev-config`)
 set -euo pipefail
-{resolve}cd "$(dirname "$(readlink -f "$TEST_SRCDIR/_main/MODULE.bazel")")"
-export PATH={venv}/bin:/usr/bin:/bin RUFF_NO_CACHE=true
+{venv}{resolve}cd "$(dirname "$(readlink -f "$TEST_SRCDIR/_main/MODULE.bazel")")"
+export PATH="$venv/bin:/usr/bin:/bin" RUFF_NO_CACHE=true FSLA_DEV_CONFIG="$PWD/.bazel/dev-config"
 exec {cmd} "$@"
 """
 
@@ -109,9 +129,10 @@ def _checkout_test_impl(ctx):
         resolve.append('tool%d="$(readlink -f "$TEST_SRCDIR/_main/%s")"\n' % (i, found[0].short_path))
         words += [flag, '"$tool%d"' % i]
     script = ctx.actions.declare_file(ctx.label.name + ".sh")
-    ctx.actions.write(script, _CHECKOUT_TEST.format(resolve = "".join(resolve), venv = shell.quote(ctx.attr.venv),
+    mark, env = environment(ctx)
+    ctx.actions.write(script, _CHECKOUT_TEST.format(resolve = "".join(resolve), venv = venv_line(mark),
                                                     cmd = " ".join(words)), is_executable = True)
-    return [DefaultInfo(executable = script, runfiles = ctx.runfiles(files = [ctx.file.anchor] + tools))]
+    return [DefaultInfo(executable = script, runfiles = ctx.runfiles(files = [ctx.file.anchor] + tools + env))]
 
 _checkout_test = rule(
     implementation = _checkout_test_impl,
@@ -120,7 +141,7 @@ _checkout_test = rule(
         "cmd": attr.string_list(mandatory = True, doc = "the check's command, run from the checkout's root"),
         "tools": attr.label_keyed_string_dict(allow_files = True, doc = "graph outputs it reads, each by the flag that names its path"),
         "anchor": attr.label(mandatory = True, allow_single_file = True, doc = "the workspace's MODULE.bazel"),
-        "venv": attr.string(mandatory = True, doc = "the environment's store venv, whose tools are on PATH"),
+        "venv": VENV_ATTR,
     },
 )
 
@@ -218,9 +239,10 @@ def _tool_run_impl(ctx):
         fail("%s: a tool run names its script (`tool`) or its module (`module`): exactly one" % ctx.label)
     what = shell.quote(ctx.attr.tool) if ctx.attr.tool else "-m " + shell.quote(ctx.attr.module)
     script = ctx.actions.declare_file(ctx.label.name + ".sh")
-    venv = ("venv=%s\n" % shell.quote(ctx.attr.venv)) if ctx.attr.environment else _CHECKOUT_VENV
+    mark, env = environment(ctx)
+    venv = venv_line(mark) if ctx.attr.environment else _CHECKOUT_VENV
     ctx.actions.write(script, _TOOL_RUN.format(venv = venv, what = what), is_executable = True)
-    return [DefaultInfo(executable = script)]
+    return [DefaultInfo(executable = script, runfiles = ctx.runfiles(files = env if ctx.attr.environment else []))]
 
 tool_run = rule(
     implementation = _tool_run_impl,
@@ -230,7 +252,7 @@ tool_run = rule(
         "module": attr.string(doc = "or the module it runs (`fsla_devtools.results`)"),
         "environment": attr.bool(doc = "run on the environment's interpreter, for a tool that imports nothing of the " +
                                        "checkout's siblings (CI has no venv)"),
-        "venv": attr.string(mandatory = True, doc = "the environment's store venv"),
+        "venv": VENV_ATTR,
     },
     doc = "A tree tool run by `bazel run` in the checkout, on its own venv or the environment's interpreter: its " +
           "arguments follow `--`.",
@@ -249,13 +271,15 @@ def tree_part(tracked, parts = {}):
 _TIER = """\
 #!/bin/bash
 # a test tier or device lane (fsla_devtools' pytest_tier, device_lane): its inputs copied into a real tree, the tree's
-# packages importable from it
+# packages importable from it; the machine's dev config the one the front door linked into the checkout the anchor
+# resolves to (its `.bazel/dev-config`), never a path in the test's environment
 set -euo pipefail
+{venv}export FSLA_DEV_CONFIG="$(dirname "$(readlink -f {anchor})")/.bazel/dev-config"
 tree="$TEST_TMPDIR/tree"
 cp -rL "$TEST_SRCDIR/_main" "$tree"
 rm -f "$tree/$TEST_BINARY"
 cd "$tree"
-{machine}export PATH={venv}/bin:/usr/bin:/bin PYTHONPATH="$tree" PYTHONDONTWRITEBYTECODE=1
+{machine}export PATH="$venv/bin:/usr/bin:/bin" PYTHONPATH="$tree" PYTHONDONTWRITEBYTECODE=1
 {toolkit}{repos}{run}"""
 
 #: the graph's copy of a pinned CUDA toolkit, the tree its nvcc runs in, handed to the tests (`FSLA_CUDA_HOME`)
@@ -277,7 +301,7 @@ if [ -n "${{TEST_TOTAL_SHARDS:-}}" ]; then
     exit 0
   fi
 fi
-exec {venv}/bin/python -m pytest -p no:cacheprovider -p fsla_devtools.graph.pytest_shards -q -rfE \\
+exec "$venv/bin/python" -m pytest -p no:cacheprovider -p fsla_devtools.graph.pytest_shards -q -rfE \\
   --junitxml="$XML_OUTPUT_FILE" {args} "${{only[@]}}" "${{shard[@]}}" "$@"
 """
 
@@ -286,7 +310,7 @@ _NO_DEVICE = 'export CUDA_VISIBLE_DEVICES=""\n'
 
 def _tier_impl(ctx):
     script = ctx.actions.declare_file(ctx.label.name + ".sh")
-    venv = shell.quote(ctx.attr.venv)
+    mark, env = environment(ctx)
     if bool(ctx.attr.cmd) == bool(ctx.attr.tests) or (ctx.attr.cmd and ctx.attr.marks):
         fail("%s: a pytest tier names its paths (`tests`, with `marks`), a lane its command (`cmd`): exactly one" % ctx.label)
     #: a lane reaches a tool by its path alone: a `cmd` word naming it in braces (`{compute-sanitizer}`) is that path
@@ -306,16 +330,16 @@ def _tier_impl(ctx):
         run = "exec %s \"$@\"\n" % " ".join(words)
     else:
         words = list(ctx.attr.tests) + (["-m", ctx.attr.marks] if ctx.attr.marks else [])
-        run = _PYTEST_RUN.format(venv = venv, args = " ".join([shell.quote(w) for w in words]))
+        run = _PYTEST_RUN.format(args = " ".join([shell.quote(w) for w in words]))
     repos, repo_files = _repos(ctx)
     carried = [target.files for target in ctx.attr.tools] + repo_files
     toolkit = _TOOLKIT.format(nvcc = ctx.file.nvcc.short_path) if ctx.attr.nvcc else ""
-    body = _TIER.format(venv = venv, machine = "" if ctx.attr.devices else _NO_DEVICE, toolkit = toolkit, repos = repos,
+    body = _TIER.format(venv = venv_line(mark), anchor = shell.quote(ctx.file.anchor.short_path), machine = "" if ctx.attr.devices else _NO_DEVICE, toolkit = toolkit, repos = repos,
                         run = run)
     ctx.actions.write(script, body, is_executable = True)
     #: a device tier's pass is its devices': their identity is one of its inputs
     identity = [ctx.file.devices] if ctx.attr.devices else []
-    files = depset(ctx.files.data + ctx.files.toolkit + identity, transitive = carried)
+    files = depset(ctx.files.data + ctx.files.toolkit + identity + env + [ctx.file.anchor], transitive = carried)
     return [DefaultInfo(executable = script, runfiles = ctx.runfiles(transitive_files = files))]
 
 _tier_test = rule(
@@ -329,7 +353,9 @@ _tier_test = rule(
         "tools": attr.label_keyed_string_dict(allow_files = True, doc = "the command's tools: each label's binary, by its name"),
         "data": attr.label_list(allow_files = True, doc = "what it reads: the tree and what the graph builds for it"),
         "repos": attr.label_keyed_string_dict(allow_files = True, doc = _REPOS_DOC),
-        "venv": attr.string(mandatory = True, doc = "the environment's store venv"),
+        "venv": VENV_ATTR,
+        "anchor": attr.label(mandatory = True, allow_single_file = True, doc = "the workspace's MODULE.bazel, which " +
+                                                                               "resolves to the checkout"),
         "toolkit": attr.label(doc = "a pinned CUDA toolkit the tests compile, assemble and disassemble with: an input, " +
                                     "so a new one reruns them"),
         "nvcc": attr.label(allow_single_file = True, doc = "the toolkit's nvcc, by which the tests find it"),

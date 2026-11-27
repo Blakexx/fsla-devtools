@@ -14,7 +14,8 @@ from fsla_devtools.graph import export
 DESCRIPTION = {"owner": "//measure:solve_c", "kind": "timed", "executor": "measure.provider:timed",
                "params": {"arm": "entmax_solve"}, "binds": ["fsla", "fsla_cu13._C"],
                "cells": ["fsla_devtools++environment+fsla_cells/c.json"],
-               "bundle": {"root": "_main", "manifest": "_main/measure/bundle.bundle.json", "python": "/venvs/k/bin/python3"}}
+               "bundle": {"root": "_main", "manifest": "_main/measure/bundle.bundle.json",
+                          "venv": "fsla_devtools++environment+fsla_env/venv/.complete"}}
 
 
 class Export(unittest.TestCase):
@@ -39,13 +40,15 @@ class Export(unittest.TestCase):
                 export.copy({"_main/m/BUILD.bazel": src}, Path(tmp) / "tree2")
 
     def test_an_exported_entry_names_its_paths_in_the_repository_in_starlark(self):
-        text = export.exported("solve_c", "//measure:solve_c", DESCRIPTION, "tree")
+        text = export.exported("solve_c", "//measure:solve_c", DESCRIPTION, "tree", "venvs/k/.complete")
         call = ast.parse(text).body[0].value  #: a Starlark call of plain literals is a Python one
         fields = {k.arg: ast.literal_eval(k.value) for k in call.keywords}
         self.assertEqual(fields["root"], "tree/_main")
         self.assertEqual(fields["manifest"], "tree/_main/measure/bundle.bundle.json")
         self.assertEqual(fields["cells"], ["tree/fsla_devtools++environment+fsla_cells/c.json"])
         self.assertEqual(fields["params"], '{"arm": "entmax_solve"}')
+        #: the environment by the repository's link to its venv, never the store's path
+        self.assertEqual(fields["venv"], "venvs/k/.complete")
         self.assertIs(fields["device"], False)
         self.assertEqual(export.starlark({"b": [True, None], "a": "true"}), '{"a": "true", "b": [True, None]}')
 

@@ -1,0 +1,18 @@
+{
+  "machine": {
+    "/bin/bash": "Bazel's own shell: its test wrapper and genrule setup are bash scripts, and every script the graph writes runs in it; what runs in it is plumbing (redirection, exec), whose bytes no shell release changes",
+    "/bin": "the action search path Bazel fixes (never the client's): the machine's coreutils copy, list and print, transforming no content the graph keys on",
+    "/usr/bin": "the action search path Bazel fixes (never the client's): the machine's coreutils copy, list and print, transforming no content the graph keys on",
+    "/usr/local/bin": "the action search path Bazel fixes for its own C++ and genrule actions (never the client's)"
+  },
+  "repositories": {},
+  "environment": {},
+  "tools": {
+    "git": "the tree is the checkout's git index and the stamp its commit: git is the owner of that format, and its listing of one index is the same on every machine",
+    "nvidia-smi": "the devices' identity (`host_gpu`): a device test's pass is its device's, and the GPU driver is a device test's input by design",
+    "sha256sum": "verifies a pinned binary against its pin's digest: a different sha256sum can only refuse, never change the content",
+    "chmod": "marks a pinned binary executable: no content",
+    "mkdir": "makes the staging directory the environment's local package is copied into: no content",
+    "cp": "copies the environment's local package into its staging directory: the bytes copied are the input"
+  }
+}

@@ -15,6 +15,7 @@ carry it. It is a development dependency: nothing a user installs imports it.
 | `fsla_devtools.instrument` | an instrument run: a tool over the files it reads, laid out as a tree of copies, its JSON (or its refusal) the output; what the `instrument` rule's action runs, and a store target's run for an instrument on the device |
 | `fsla_devtools.record` | the record of a build output: the program a `results_store` run target starts, storing each output file unless its record already holds it |
 | `fsla_devtools.process` | `subprocess.run` for a command that starts processes of its own: a timeout or an interrupt stops the whole tree |
+| `fsla_devtools.hermetic` | the hermetic check every workspace's gate runs (`bazel/hermetic.bzl`'s `hermetic_test`), [below](#the-hermetic-check) |
 | `fsla_devtools.config` | the dev config reader: one directory of JSON files a section, every key declared; the machine's `host`, `clock` and `store` sections every repository shares |
 | `fsla_devtools.locks` | the machine's locks: the GPU lock (exclusive or shared), the host-compute budget and named file locks, the SM clock lock (the machine's, counted by its holders) |
 | `fsla_devtools.graph` | the build graph's shared machinery: the front door every repository's Bazel runs through, the environment's store builder, the bundle tag's export of another workspace's entries, the test tiers' sharding plugin |
@@ -142,8 +143,8 @@ A timing compares only inside the session that interleaved it, so two commits ar
 built in ITS OWN workspace by its own pins, and the environment extension's `bundle` tag consumes what it built:
 
 ```python
-environment.bundle(name = "reference", commit = SHA, remote = "https://github.com/Blakexx/fsla.git")
-environment.bundle(name = "candidate", worktree_env = "FSLA_CANDIDATE")    # --repo_env=FSLA_CANDIDATE=PATH
+environment.bundle(name = "reference", commit = SHA, remote = "https://github.com/Blakexx/fsla.git", uv = UV, uv_pin = UV_PIN)
+environment.bundle(name = "candidate", worktree_env = "FSLA_CANDIDATE", uv = UV, uv_pin = UV_PIN)  # --repo_env=FSLA_CANDIDATE=PATH
 ```
 
 The repository rule (`fsla_devtools.graph.export`) checks a commit out once under the store (`$FSLA_GRAPH_STORE/
@@ -153,7 +154,8 @@ server down after; a local checkout (`worktree_env`: a module names no machine p
 built in place with the override, again every invocation, incrementally. Either way `bazel cquery` reads each
 `_timing_entry` target of `packages` (default `//measure:all`: entries, clock readers and diff sides) and its runfiles
 (`export.cquery`), `bazel build` builds them, and every file is COPIED into the repository's `tree/` -- a link into
-another output base dangles once that base is cleaned. The repository holds one `exported_entry` a target, by the
+another output base dangles once that base is cleaned -- but a bundle's environment, which is a link `venvs/<key>` to
+the store venv its completion mark resolves to, so an exported description names it by its path in the repository. The repository holds one `exported_entry` a target, by the
 target's own name (`@reference//:clock`), carrying the same provider as `timing_entry` with its paths this workspace's,
 and `exports.bzl` (`ENTRIES`: each target's kind, executor, parameters and cells by name) for a workspace's macros. A
 record names the entry by the role the workspace gives its repository (`@reference//:...`) and by its bundle's digest
@@ -367,7 +369,9 @@ library; realizing a cell needs torch.
 ## The dev config and the machine's locks
 
 Every value that depends on the machine lives in one directory of JSON files, one a section: `~/.config/fsla/`, or the
-directory `FSLA_DEV_CONFIG` names (a container, a test). A schema declares each section's keys with a kind, a default and
+directory `FSLA_DEV_CONFIG` names (a container, a test). A test that takes the machine's locks (a tier, a check of the
+commit) reads the directory the front door ran with through the checkout's `.bazel/dev-config`, the front door's link
+(`front_door.DEV_CONFIG_LINK`), never a path in the test's environment, which would key every test by the machine. A schema declares each section's keys with a kind, a default and
 a meaning; a key a file holds that its section does not declare is refused, so a typo fails instead of silently taking
 a default. `fsla_devtools.config.MACHINE` declares the sections every repository shares -- `host` (lock paths, the
 compute budget, niceness, the caches and the disk's bounds: [the machine's disk](#the-machines-disk)), `clock` (the SM
@@ -417,26 +421,41 @@ first trims the repository cache's unused downloads when a trim is due. `bazel -
 
 | Tag | Repository |
 |---|---|
-| `python` | a Python environment: the pinned CPython, a hash-pinned lock's packages, then packages pinned by commit and this module's `fsla_devtools`, built once a key into the machine's shared store (`fsla_devtools.graph.make_env`); `isolated_builds = False` builds the pinned packages against the environment, for one whose build imports a locked package |
+| `python` | a Python environment: the pinned CPython, a hash-pinned lock's packages, then packages pinned by commit and this module's `fsla_devtools`, built once a key into the machine's shared store (`fsla_devtools.graph.make_env`, itself run on the pinned CPython); `isolated_builds = False` builds the pinned packages against the environment, for one whose build imports a locked package. The environment BY LABEL is `@<name>//:venv` (its `flags.bzl`'s `VENV`): the store venv's completion mark through the repository's link to the venv, and `environment.key`, the venv's key. Every rule that runs on an environment takes it as `venv` (`bazel/rules.bzl`'s `VENV_ATTR`): a script resolves the venv from the mark's runfiles path where it runs, an action names the interpreter by its execution-root path through the link, a description carries the mark's runfiles path (`fsla_devtools.timing.interpreter`), and the key is an input of each -- so no command, script or output names the store's machine path |
 | `pinned` | a release pinned by URL and digest (uv, mold, clang-tidy, Nsight Compute, Nsight Systems), an archive a .tar.gz or a .tar.xz |
 | `cuda_toolkit` | a CUDA toolkit from NVIDIA's redistributables, pinned by their manifest's digest (which carries each component's) |
-| `host_cc`, `host_gpu` | the host C++ compiler's and the machine's devices' identities, which actions that depend on them are keyed on |
+| `host_gpu` | the machine's devices' identity, which the actions and tests that depend on them are keyed on |
 | `tree` | the checkout's tracked files (`git ls-files`; the commit's index under the commit gate) |
 | `data` | the data repository at one commit (`remote`, `commit`, the `sha256` of the commit's archive): its `records/`, as `:records`, each file by its path, and `:root` (its BUILD file, which names the root) (`bazel/data.BUILD`), nothing of its own graph -- what a workspace's citations and readers take, fixed content at the pin |
-| `cells` | every central cell's description as a target (`@<name>//:<cell>`, a `cell` of `bazel/measure.bzl`) and every cell's fields (`@<name>//:cells.bzl`'s `CELLS`), generated from this module's registry on the machine's `python3` |
-| `bundle` | another workspace's timing entries, clock readers and diff sides, built there by its own pins and copied in (`@<name>//:<target>`, `exported_entry`; `@<name>//:exports.bzl`'s `ENTRIES`): a commit (`commit`, `remote`) or a local checkout the run names (`worktree_env`), [above](#bundles) |
+| `cells` | every central cell's description as a target (`@<name>//:<cell>`, a `cell` of `bazel/measure.bzl`) and every cell's fields (`@<name>//:cells.bzl`'s `CELLS`), generated from this module's registry on uv's pinned CPython (`uv`, `uv_pin`) |
+| `bundle` | another workspace's timing entries, clock readers and diff sides, built there by its own pins and copied in (`@<name>//:<target>`, `exported_entry`; `@<name>//:exports.bzl`'s `ENTRIES`): a commit (`commit`, `remote`) or a local checkout the run names (`worktree_env`), exported on uv's pinned CPython (`uv`, `uv_pin`), [above](#bundles) |
 | `docrefs` | the doc references' tool as `@<name>//:docrefs.py`, a copy of `fsla_devtools/docrefs.py` a workspace's `docrefs_test` runs ([below](#the-doc-references)) |
 
 `python`, `pinned`, `cuda_toolkit` and `data` are REPRODUCIBLE repositories (`repo_metadata(reproducible = True)`: their result
 is fixed by their pins and the files they read), so Bazel unpacks each once into the repo contents cache
-(`host.build_cache`'s `repository/contents`) and every checkout's output base links it; `host_cc`, `host_gpu` and `tree`
-read the machine or the workspace, `cells` and `docrefs` are made from this module's source, `bundle` is another
+(`host.build_cache`'s `repository/contents`) and every checkout's output base links it; `host_gpu` and `tree` read the
+machine or the workspace, `cells` and `docrefs` are made from this module's source, `bundle` is another
 workspace's build, and each is made per checkout.
 
 **The environment store is bounded.** `host.store_max_gb` and `host.store_max_age_days` (the dev config) bound the store
 the `python` tag builds into: each environment build sweeps, under the store's lock, the environments idle past the age
 and the cached wheels nothing hardlinks, and, over the size, the oldest of them, never the environment it was asked for;
 a swept environment a checkout still names is rebuilt from the cache or the index.
+
+<a id="the-hermetic-check"></a>**The hermetic check** (`bazel/hermetic.bzl`'s `hermetic_test`, `fsla_devtools.hermetic`):
+every tool an action runs is pinned, and the machine gives only what an allowlist names with its reason. A workspace's
+gate holds one over its gate's targets, `hermetic_test(name = "hermetic", targets = [...], venv = VENV)` (`allowlist`, a
+file of its own that extends this module's default, `bazel/hermetic.json`; `cc = True` for a workspace that compiles C++).
+An aspect reads every action under the targets -- its command line, environment, a written file's text and the
+repositories its inputs come from -- and the test refuses a machine path in any of them (`fsla_devtools.results.store`'s
+pattern), a machine tool (an absolute path under `/bin`, `/usr`, `/opt`, `/etc`, `/lib`) the allowlist's `machine`
+section does not name, and an input from a repository Bazel detected on the machine (`local_config_*`) its
+`repositories` section does not; an action whose command line Starlark does not expose and that is not one of the
+symlink and manifest actions is a finding of its own. It reads the repository rules through what Bazel records of them,
+`MODULE.bazel.lock`'s `FILE:` and `ENV:` inputs of every module extension (a module's file, or a variable `environment`
+names); the lockfile records no tool a repository rule runs, so it also reads the Starlark of the workspace's tree and of
+this module for `rctx.which("<tool>")` and `rctx.execute(["<tool>", ...])`, each tool one `tools` names. With `cc`, the
+`.bazelrc` keeps rules_cc from detecting the machine's compiler (`BAZEL_DO_NOT_DETECT_CPP_TOOLCHAIN=1`).
 
 **The shared pins** (`pins/`, each a workspace's `@fsla_devtools//pins:<name>_pin.json`): one pin for each tool every FSLA workspace shares.
 

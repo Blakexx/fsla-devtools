@@ -17,6 +17,9 @@ load(
 )
 load("//bazel:workspace.bzl", "tree_part")
 
+#: the root package's hermetic check reads these targets whole
+package(default_visibility = ["//:__pkg__"])
+
 CELLS = [
     "@devtools_cells//:carry-anti-64x64-T1024-carried",
     "@devtools_cells//:carry-onehot-16x16-T1024",

@@ -29,10 +29,22 @@ from pathlib import Path
 REFUSED = "refused"
 
 
+#: AN ENVIRONMENT'S COMPLETION MARK (an environment repository's `venv/.complete`, bazel/rules.bzl's `environment`): laid out
+#: as its directory, a link to the store venv it resolves to, so a description in the tree resolves to its interpreter
+#: (`fsla_devtools.timing.interpreter`); a copy of the mark would resolve to the tree
+MARK = ("venv", ".complete")
+
+
 def lay_out(files: list[tuple[str, str]], tree: Path) -> None:
-    """Each `(path in the tree, source)` copied to its path under `tree`, links followed."""
+    """Each `(path in the tree, source)` copied to its path under `tree`, links followed; an environment's mark as the
+    link to its venv (`MARK`)."""
     for path, source in files:
         dest = tree / path
+        if (dest.parent.name, dest.name) == MARK:
+            if not dest.parent.is_symlink():
+                dest.parent.parent.mkdir(parents=True, exist_ok=True)
+                dest.parent.symlink_to(Path(os.path.realpath(source)).parent)
+            continue
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, dest)
         shutil.copymode(source, dest)

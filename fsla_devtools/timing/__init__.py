@@ -11,8 +11,17 @@ session, a worker that dies, or a crash of the timing itself fails the run.
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
+
+
+def interpreter(root: Path, venv: str) -> str:
+    """A bundle's interpreter: `venv` is its environment's completion mark by its path under `root` (an entry
+    description's `bundle.venv`, a runfiles path), whose resolved directory is the store venv -- so a description names
+    no machine path and the run finds the venv wherever it runs."""
+    return str(Path(os.path.realpath(root / venv)).parent / "bin" / "python3")
 
 
 @dataclass(frozen=True)
@@ -24,4 +33,4 @@ class Timed:
     outside_allocator: Callable[[], int] | None = None
 
 
-__all__ = ["Timed"]
+__all__ = ["Timed", "interpreter"]

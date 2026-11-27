@@ -51,6 +51,7 @@ from ..config import machine
 from ..locks import clock, host
 from ..locks.gpu import gpu_lock
 from ..results.store import run_id
+from . import interpreter
 from .pool import EntryWorker, Pool
 
 #: launches of each entry discarded before any is recorded: the first build schedules and warm caches
@@ -178,7 +179,8 @@ def _read(runfiles: Path, path: str) -> dict:
 
 def _worker(pool: Pool, runfiles: Path, entry: dict, instance: str = "") -> EntryWorker:
     root = str(runfiles / entry["bundle"]["root"])
-    return pool.worker({"python": entry["bundle"]["python"], "cwd": root, "pythonpath": root, "instance": instance})
+    return pool.worker({"python": interpreter(runfiles, entry["bundle"]["venv"]), "cwd": root, "pythonpath": root,
+                        "instance": instance})
 
 
 def _portable(runfiles: Path) -> Callable[[str], str]:

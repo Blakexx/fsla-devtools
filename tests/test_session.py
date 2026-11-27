@@ -49,6 +49,9 @@ class Session(unittest.TestCase):
         for name in ("fake_entries.py", "fake_provider.py"):
             (bundle / name).symlink_to(HERE / name)
         (bundle / "fsla_devtools").symlink_to(ROOT / "fsla_devtools")
+        #: the bundle's environment, this one, as an environment repository links it: its mark resolves to the venv
+        (self.runfiles / "env").mkdir()
+        (self.runfiles / "env" / "venv").symlink_to(sys.prefix)
         cells = self.runfiles / "cells"
         cells.mkdir()
         for tokens in (8, 16):
@@ -79,7 +82,7 @@ class Session(unittest.TestCase):
         (self.runfiles / path).write_text(json.dumps({
             "owner": f"//measure:{name}", "kind": kind, "executor": f"fake_entries:{executor}", "params": params or {},
             "binds": list(binds), "cells": [f"cells/{c}.json" for c in cells],
-            "bundle": {"root": "_main", "manifest": "_main/measure/tip.bundle.json", "python": sys.executable}}))
+            "bundle": {"root": "_main", "manifest": "_main/measure/tip.bundle.json", "venv": "env/venv/.complete"}}))
         return path
 
     def manifest(self, entries, claim="unlocked", clock=None) -> dict:

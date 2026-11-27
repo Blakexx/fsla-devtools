@@ -2,7 +2,7 @@
 by quantity under one rule (`strategies.py`); and a diff's gate over that verdict.
 
     TOOL --left DESC --right DESC --strategy S [--params JSON] [--expect same|different] [--minimum N]
-         [--threads N] [--environment NAME] --json OUT                         # the verdict, an instrument's tool
+         [--threads N] --json OUT                                             # the verdict, an instrument's tool
     python -m fsla_devtools.diff.verdict --check --runfiles DIR --spec PATH    # a `diff_test`
 
 `bazel/measure.bzl`'s `diff_verdict` is an instrument whose tool is this: it runs in the instrument's tree, where both
@@ -30,6 +30,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from ..timing import interpreter
 from .strategies import compare as apply_strategy
 
 
@@ -37,7 +38,7 @@ def _side(description: Path, tree: Path, out: Path, threads: int) -> dict:
     d = json.loads(description.read_text())
     root = tree / d["bundle"]["root"]
     env = {**os.environ, "PYTHONPATH": str(root), "PYTHONDONTWRITEBYTECODE": "1"}
-    done = subprocess.run([d["bundle"]["python"], "-m", "fsla_devtools.diff.side", "--description",
+    done = subprocess.run([interpreter(tree, d["bundle"]["venv"]), "-m", "fsla_devtools.diff.side", "--description",
                            str(description.absolute()), "--tree", str(tree.absolute()), "--out", str(out),
                            "--threads", str(threads)], cwd=root, env=env, check=False)
     if done.returncode:
@@ -171,7 +172,6 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--expect", default="same", choices=("same", "different"))
     ap.add_argument("--minimum", type=int, default=1)
     ap.add_argument("--threads", type=int, default=1)
-    ap.add_argument("--environment", help="the comparison's environment, named so it keys the record")
     ap.add_argument("--json", type=Path)
     a = ap.parse_args(argv)
     if a.check:

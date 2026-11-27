@@ -6,11 +6,13 @@ It hands Bazel the machine's settings from the dev config (the shared disk and r
 `host.build_cache`, the environment store's bound `host.store_max_gb` and `host.store_max_age_days`, as an rc file read
 after the workspace's), and, where the workspace depends on the `fsla_devtools` module, the machine's fsla-devtools
 checkout as that module's override (a second rc file, the workspace's own), so a change made there is the one the graph
-runs and nothing names a machine path -- except in a commit the `bundle` tag builds by its own pins (`OWN_PINS`).
-It runs every BUILD under the host budget (`fsla_devtools.locks.host`): a
-command's build phase holds the slots free when it starts, at least one, and runs one compile job a `host.nvcc_threads`
-of them; its test or run phase holds none, so a test or a measurement takes its own locks as it does outside the graph
--- a GPU test under a held budget is the deadlock the host's lock order exists to prevent.
+runs and nothing names a machine path -- except in a commit the `bundle` tag builds by its own pins (`OWN_PINS`). It
+links the dev config it ran with into the checkout's `.bazel/` (`DEV_CONFIG_LINK`), where a test that takes the
+machine's locks finds it, so no test is keyed by the machine's config path. It runs every BUILD under the host budget
+(`fsla_devtools.locks.host`): a command's build phase holds the slots free when it starts, at least one, and runs one
+compile job a `host.nvcc_threads` of them; its test or run phase holds none, so a test or a measurement takes its own
+locks as it does outside the graph -- a GPU test under a held budget is the deadlock the host's lock order exists to
+prevent.
 
 It holds the machine's disk (`fsla_devtools.disk`): a build, test or run is refused before Bazel starts while a watched
 filesystem is under the free-space floor (`disk.floor`), and `bazel --worktree ...` is the worktree tool (`disk.worktrees`:
@@ -79,12 +81,31 @@ def machine_rc() -> Path:
         #: bound is not a new environment)
         f"common --repo_env=FSLA_GRAPH_STORE_MAX_BYTES={config.machine('host.store_max_gb') * 1024**3}\n"
         f"common --repo_env=FSLA_GRAPH_STORE_MAX_AGE_DAYS={config.machine('host.store_max_age_days')}\n"
-        f"common --repo_env=FSLA_NVCC_THREADS={config.machine('host.nvcc_threads')}\n"
-        #: a check of the commit reads the machine's dev config; a check over files unsets it
-        f"test --test_env=FSLA_DEV_CONFIG={config.directory()}\n")
+        #: read by no graph since a compile's `--threads` became its architecture count; an older commit a `bundle` builds
+        #: by its own pins still writes its flags from it, under this front door
+        f"common --repo_env=FSLA_NVCC_THREADS={config.machine('host.nvcc_threads')}\n")
     # named by its content: checkouts pinned to different versions of this module write different text, and each keeps its own
     # file instead of overwriting the other's mid-run (the write itself is a rename, and skipped when unchanged)
     return _write(cache / f"machine-{hashlib.sha256(text.encode()).hexdigest()[:12]}.bazelrc", text)
+
+
+#: THE MACHINE'S DEV CONFIG AS A TEST FINDS IT: a link in the checkout's output-link directory (`.bazel/`, ignored) to the
+#: directory the front door was run with, which a test that takes the machine's locks (a tier, a check of the commit,
+#: bazel/rules.bzl) reads from the checkout it resolves -- never a test environment variable, whose value would key every
+#: test by the machine's path
+DEV_CONFIG_LINK = Path(".bazel") / "dev-config"
+
+
+def dev_config_link(workspace: Path) -> Path:
+    """`DEV_CONFIG_LINK` in `workspace`, pointing at this run's dev config; replaced through a rename only when it moved."""
+    link, target = workspace / DEV_CONFIG_LINK, str(config.directory())
+    if not link.is_symlink() or os.readlink(link) != target:
+        link.parent.mkdir(parents=True, exist_ok=True)
+        tmp = link.with_name(f".{link.name}.{os.getpid()}")
+        tmp.unlink(missing_ok=True)
+        tmp.symlink_to(target)
+        os.replace(tmp, link)
+    return link
 
 
 def depends_on_module(workspace: Path) -> bool:
@@ -190,6 +211,7 @@ def main(argv: list[str], workspace: Path) -> int:
                          "outside the host budget, and the graph has no coverage target")
     if command in floor.FLOORED:
         floor.hold(command)
+    dev_config_link(workspace)
     own = workspace_rc(workspace)
     head = [real, *startup, f"--bazelrc={machine_rc()}", *([f"--bazelrc={own}"] if own else [])]
     if command in BUILDS:

@@ -199,8 +199,8 @@
   "moduleExtensions": {
     "//bazel:environment.bzl%environment": {
       "general": {
-        "bzlTransitiveDigest": "VuMCgL/gWMA327qlh8oGiQAnmTxdUxedMaMWvGrAFoc=",
-        "usagesDigest": "nVUIV7YfjBLQ4s15aS9s6GlWHzmiwWA9KGLDCtiQaZc=",
+        "bzlTransitiveDigest": "lTWiB9dJ/g9QRsYPprohhmkdatVbWfamvzzNKNuzkfI=",
+        "usagesDigest": "XKxw60upjtQn3uEqmppB9d60wPTy8XZ9Oq46jvd8Gl0=",
         "recordedInputs": [
           "REPO_MAPPING:,uv +environment+uv"
         ],
@@ -236,7 +236,10 @@
           },
           "devtools_cells": {
             "repoRuleId": "@@//bazel:environment.bzl%_cells_repo",
-            "attributes": {}
+            "attributes": {
+              "uv": "@@+environment+uv//:uv",
+              "uv_pin": "@@//pins:uv_pin.json"
+            }
           }
         }
       }

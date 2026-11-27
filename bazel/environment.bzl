@@ -1,6 +1,6 @@
 """THE GRAPH'S ENVIRONMENT, every FSLA repository's: a module extension whose tags make the repositories a workspace's
 graph runs on -- a Python environment built from a lock into the machine's shared store (`python`), a release pinned
-by digest (`pinned`), the host C++ compiler's and the machine's devices' identities (`host_cc`, `host_gpu`), a pinned
+by digest (`pinned`), the machine's devices' identity (`host_gpu`), a pinned
 CUDA toolkit (`cuda_toolkit`), the checkout's tracked files (`tree`), the data repository at one commit (`data`),
 every central cell's description as a target (`cells`, `bazel/measure.bzl`'s `cell`), the doc references' tool
 (`docrefs`, `bazel/rules.bzl`'s `docrefs_test`), and the timing entries and diff sides of another fsla commit or a local
@@ -19,10 +19,10 @@ repository and hands it the workspace's own pins and files; nothing here names a
 #: and the files it reads -- a release by its digest (`pinned`, `cuda_toolkit`), a commit's archive by its digest
 #: (`data`), an environment by its lock's key
 #: (`python`: the store's venv is the lock's and pins', the repository only links it) -- is unpacked once into Bazel's
-#: repo contents cache, which every workspace on the machine shares, and each output base links it. `host_cc`,
-#: `host_gpu` and `tree` are not: they read the machine's compiler, its devices and the workspace's git index, so each
-#: workspace makes its own; nor is `cells`, a few kilobytes generated from the registry on the machine's python3, nor
-#: `docrefs`, one file copied, nor `bundle`, another workspace's build copied.
+#: repo contents cache, which every workspace on the machine shares, and each output base links it. `host_gpu`
+#: and `tree` are not: they read the machine's devices and the workspace's git index, so each workspace makes its own;
+#: nor is `cells`, a few kilobytes generated from the registry, nor `docrefs`, one file copied, nor `bundle`, another
+#: workspace's build copied.
 
 def _store(rctx):
     store = rctx.getenv("FSLA_GRAPH_STORE")
@@ -30,12 +30,41 @@ def _store(rctx):
         fail("FSLA_GRAPH_STORE is unset: run Bazel through its front door, `bazel` (fsla_devtools.graph.front_door)")
     return store
 
+#: THE PINNED INTERPRETER A REPOSITORY RULE RUNS ITS SCRIPT ON (the environment's builder, the cell registry, a bundle's
+#: export): uv's pin's CPython, which uv installs into the store, never the machine's `python3`
+_UV_ATTRS = {
+    "uv": attr.label(mandatory = True, allow_single_file = True, doc = "the pinned uv, which installs the interpreter"),
+    "uv_pin": attr.label(mandatory = True, doc = "uv's pin, whose `python` names the interpreter"),
+}
+
+def _interpreter(rctx):
+    """The pin's CPython in the store (`uv python install`, then `uv python find`), as the environment's builder installs
+    it: uv's interpreters and cache are the store's, never the user's."""
+    store = _store(rctx)
+    version = json.decode(rctx.read(rctx.attr.uv_pin))["python"]
+    uv = str(rctx.path(rctx.attr.uv))
+    env = {"UV_PYTHON_INSTALL_DIR": store + "/python", "UV_CACHE_DIR": store + "/uv-cache",
+           "UV_PYTHON_PREFERENCE": "only-managed", "UV_NO_CONFIG": "1"}
+    installed = rctx.execute([uv, "python", "install", "--no-bin", version], environment = env, timeout = 1800)
+    found = rctx.execute([uv, "python", "find", version], environment = env)
+    if installed.return_code or found.return_code:
+        fail("the pinned CPython %s: %s" % (version, installed.stderr + found.stderr))
+    return found.stdout.strip()
+
 _PYTHON_BUILD = """\
 package(default_visibility = ["//visibility:public"])
 
 #: the interpreter the graph's actions run: the environment's base Python (a link it resolves to find its standard
 #: library), standard library only
 filegroup(name = "python", srcs = ["bin/python3"])
+"""
+
+#: THE ENVIRONMENT BY LABEL, every environment repository's whatever its BUILD file (`VENV` in its `flags.bzl` names it):
+#: the store venv's completion mark through the repository's link to the venv -- an action, a test or a run resolves the
+#: venv from it where it runs, so no command or script names the store's machine path -- and the environment's key, the
+#: file that keys what runs on it
+_VENV_BUILD = """
+filegroup(name = "venv", srcs = ["venv/.complete", "environment.key"], visibility = ["//visibility:public"])
 """
 
 def _build(rctx, default):
@@ -62,7 +91,7 @@ def _python_impl(rctx):
         devtools = rctx.path(rctx.attr._devtools).dirname
         rctx.watch_tree(devtools.get_child("fsla_devtools"))
         staged = rctx.path("devtools_package")
-        rctx.execute(["rm", "-rf", str(staged)])
+        rctx.delete(staged)
         rctx.execute(["mkdir", "-p", str(staged)])
         for name in _DEVTOOLS_INSTALLS:
             source = devtools.get_child(name)
@@ -74,7 +103,7 @@ def _python_impl(rctx):
         packages.append(str(staged))
     packages += rctx.attr.packages
     args = [
-        rctx.which("python3"),
+        _interpreter(rctx),
         rctx.path(rctx.attr.make_env),
         "--store",
         _store(rctx),
@@ -104,6 +133,8 @@ def _python_impl(rctx):
     rctx.symlink(paths["base"] + "/bin/python3", "bin/python3")
     #: the repository is links into the store: a venv swept from the store (fsla_devtools.graph.make_env) invalidates it
     rctx.watch(paths["venv"] + "/.complete")
+    rctx.symlink(paths["venv"], "venv")
+    rctx.file("environment.key", paths["venv"].rstrip("/").rsplit("/", 1)[1] + "\n")
     facts = ""
     if rctx.attr.post:
         environment = {}
@@ -117,10 +148,9 @@ def _python_impl(rctx):
         if post.return_code != 0:
             fail("the environment's facts (%s) failed:\n%s" % (rctx.attr.post, post.stderr))
         facts = post.stdout
-    #: the environment's own interpreter and tools by their store path: the path carries the environment's key, so a
-    #: command naming it is keyed by the environment
-    rctx.file("flags.bzl", facts + "VENV = %s\n" % json.encode(paths["venv"]))
-    rctx.file("BUILD.bazel", _build(rctx, _PYTHON_BUILD))
+    #: the environment by label (`_VENV_BUILD`): a rule's `venv` attribute takes it
+    rctx.file("flags.bzl", facts + "VENV = %s\n" % json.encode("@@%s//:venv" % rctx.name))
+    rctx.file("BUILD.bazel", _build(rctx, _PYTHON_BUILD) + _VENV_BUILD)
     return rctx.repo_metadata(reproducible = True)
 
 #: what fsla_devtools' install reads of its repository: the project file, the files it names, the package
@@ -153,7 +183,7 @@ _python_repo = repository_rule(
         "make_env": attr.label(default = "//fsla_devtools/graph:make_env.py"),
         "_devtools": attr.label(default = "//:pyproject.toml"),
     },
-    doc = "A Python environment: a lock built once a key into the shared store, and `flags.bzl` with its venv's path.",
+    doc = "A Python environment: a lock built once a key into the shared store, and `flags.bzl` with its venv by label.",
 )
 
 def _pinned_impl(rctx):
@@ -196,30 +226,6 @@ _pinned_repo = repository_rule(
     implementation = _pinned_impl,
     attrs = _pinned_attrs,
     doc = "A pinned release, downloaded by its pin's digest.",
-)
-
-def _host_cc_impl(rctx):
-    cc = rctx.which("gcc")
-    if not cc:
-        fail("no gcc on PATH: the host C++ compiler nvcc drives is the machine's")
-    tools = {
-        "gcc": cc,
-        "g++": rctx.which("g++"),
-        "cc1plus": rctx.path(rctx.execute([cc, "-print-prog-name=cc1plus"]).stdout.strip()),
-    }
-    parts = []
-    for tool, path in tools.items():
-        rctx.watch(path)
-        digest = rctx.execute(["sha256sum", str(path)]).stdout.split(" ")[0]
-        parts.append("# %s %s %s" % (tool, path, digest))
-    version = rctx.execute([cc, "--version"]).stdout.splitlines()[0]
-    rctx.file("identity.txt", "# THE HOST C++ COMPILER'S IDENTITY, an input of every compile that no compile prunes\n# %s\n%s\n" % (version, "\n".join(parts)))
-    rctx.file("BUILD.bazel", 'exports_files(["identity.txt"], visibility = ["//visibility:public"])\n')
-
-_host_cc_repo = repository_rule(
-    implementation = _host_cc_impl,
-    doc = "The host C++ compiler's version and digests, as a file every compile takes as an input (never a header, " +
-          "which a compile drops from its key when it does not read it).",
 )
 
 def _host_gpu_impl(rctx):
@@ -266,7 +272,7 @@ def _cuda_toolkit_impl(rctx):
     for component in pin["components"]:
         _component(rctx, root, redist[component]["linux-x86_64"], ".", "licenses/%s/LICENSE" % component)
     for link, target in pin["links"].items():
-        rctx.execute(["ln", "-sfn", target, link])
+        rctx.symlink(target, link)
     #: further components each in a folder of its own, the BUILD file's to expose (their headers, their tools)
     for component, folder in rctx.attr.beside.items():
         _component(rctx, root, redist[component]["linux-x86_64"], folder, "LICENSE")
@@ -366,7 +372,7 @@ def _cells_impl(rctx):
     root = rctx.path(rctx.attr._devtools).dirname
     #: re-read when the registry or its drawing code moves: the draw digest is over the whole package
     rctx.watch_tree(root.get_child("fsla_devtools").get_child("cells"))
-    found = rctx.execute([rctx.which("python3"), "-B", "-S", "-c", "import json, sys\nsys.path.insert(0, sys.argv[1])\n" +
+    found = rctx.execute([_interpreter(rctx), "-B", "-S", "-c", "import json, sys\nsys.path.insert(0, sys.argv[1])\n" +
                           "from fsla_devtools.cells import descriptions, facts\n" +
                           "print(json.dumps({'descriptions': descriptions(), 'facts': repr(facts())}))", str(root)])
     if found.return_code != 0:
@@ -382,7 +388,7 @@ def _cells_impl(rctx):
 
 _cells_repo = repository_rule(
     implementation = _cells_impl,
-    attrs = {"_devtools": attr.label(default = "//:pyproject.toml")},
+    attrs = _UV_ATTRS | {"_devtools": attr.label(default = "//:pyproject.toml")},
     doc = "Every central cell as a target (`@<name>//:<cell>`): its description, never its tensors; and every cell's " +
           "fields as Starlark (`@<name>//:cells.bzl`'s `CELLS`).",
 )
@@ -407,9 +413,10 @@ load("{rules}", "exported_entry")
 
 package(default_visibility = ["//visibility:public"])
 
+#: the bundles' files, and each environment's completion mark through the link to its venv (fsla_devtools.graph.export)
 filegroup(
     name = "tree",
-    srcs = glob(["tree/**"]),
+    srcs = glob(["tree/**", "venvs/*/.complete"]),
 )
 """
 
@@ -417,7 +424,7 @@ def _bundle_impl(rctx):
     store = _store(rctx)
     devtools = rctx.path(rctx.attr._devtools).dirname
     rctx.watch_tree(devtools.get_child("fsla_devtools").get_child("graph"))
-    args = [rctx.which("python3"), "-B", "-S", str(rctx.path(rctx.attr._export)), "--out", str(rctx.path(".")),
+    args = [_interpreter(rctx), "-B", "-S", str(rctx.path(rctx.attr._export)), "--out", str(rctx.path(".")),
             "--cquery", str(rctx.path(rctx.attr._cquery))]
     environment = {}
     if rctx.attr.commit:
@@ -461,7 +468,7 @@ def _bundle_impl(rctx):
               rctx.read("exports.BUILD"))
     rctx.delete("exports.BUILD")
 
-_bundle_attrs = {
+_bundle_attrs = _UV_ATTRS | {
     "commit": attr.string(doc = "the commit built, fetched from `remote` into the store's checkouts"),
     "remote": attr.string(doc = "the repository the commit is fetched from"),
     "worktree_env": attr.string(doc = "or a local checkout, built in place: the repository environment variable the " +
@@ -501,12 +508,11 @@ def _named(attrs):
 _TAGS = {
     "python": (_python_repo, _named(_python_attrs)),
     "pinned": (_pinned_repo, _named(_pinned_attrs)),
-    "host_cc": (_host_cc_repo, _named({})),
     "host_gpu": (_host_gpu_repo, _named({})),
     "cuda_toolkit": (_cuda_toolkit_repo, _named(_cuda_toolkit_attrs)),
     "tree": (_tree_repo, _named({})),
     "data": (_data_repo, _named(_data_attrs)),
-    "cells": (_cells_repo, _named({})),
+    "cells": (_cells_repo, _named(_UV_ATTRS)),
     "docrefs": (_docrefs_repo, _named({})),
     "bundle": (None, _named(_bundle_attrs)),
 }
@@ -526,7 +532,7 @@ environment = module_extension(
     implementation = _environment_impl,
     tag_classes = {kind: tag_class(attrs = attrs) for kind, (_repo, attrs) in _TAGS.items()},
     doc = "The graph's environment, made from the root module's tags: its Python environments, pinned releases, the " +
-          "host compiler's and devices' identities, a pinned CUDA toolkit, the checkout's tracked files, the data " +
+          "devices' identity, a pinned CUDA toolkit, the checkout's tracked files, the data " +
           "repository at one commit, the central cells' descriptions, the doc references' tool and other commits' " +
           "bundles.",
 )

@@ -1,15 +1,35 @@
 """The module's Starlark: the environment extension (environment.bzl), the generic rules (rules.bzl), the
-measurement rules (measure.bzl), the results store's rules (results.bzl), and the data repository's BUILD file in a graph
-that pins it (data.BUILD)."""
-
-load(":workspace.bzl", "tree_part")
+measurement rules (measure.bzl), the results store's rules (results.bzl), the hermetic check (hermetic.bzl) and its
+default allowlist (hermetic.json), and the data repository's BUILD file in a graph that pins it (data.BUILD). This
+package loads nothing of this repository's own graph, so a workspace's targets can depend on its files (the hermetic
+check reads them)."""
 
 exports_files([
     "data.BUILD",
     "environment.bzl",
+    "hermetic.bzl",
     "measure.bzl",
     "results.bzl",
     "rules.bzl",
 ])
 
-tree_part()
+#: THE HERMETIC CHECK'S DEFAULT ALLOWLIST (fsla_devtools.hermetic): what the machine gives every FSLA graph, each entry
+#: with why; a workspace's `hermetic_test` extends it with its own
+exports_files(
+    ["hermetic.json"],
+    visibility = ["//visibility:public"],
+)
+
+#: this module's Starlark, whose repository rules the hermetic check reads in every workspace (hermetic.bzl)
+filegroup(
+    name = "starlark",
+    srcs = glob(["*.bzl"]),
+    visibility = ["//visibility:public"],
+)
+
+#: this package's part of the tree (`tree_part`'s `tracked`, as a glob: that macro needs this repository's own graph)
+filegroup(
+    name = "tracked",
+    srcs = glob(["*"], exclude = ["BUILD.bazel"]) + ["BUILD.bazel"],
+    visibility = ["//visibility:public"],
+)

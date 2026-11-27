@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -100,14 +101,15 @@ def starlark(value) -> str:
     return json.dumps(value)
 
 
-def exported(name: str, label: str, d: dict, tree: str) -> str:
-    """One `exported_entry` of the generated BUILD file, its paths the repository's."""
+def exported(name: str, label: str, d: dict, tree: str, venv: str) -> str:
+    """One `exported_entry` of the generated BUILD file, its paths the repository's; `venv` its environment's completion
+    mark, by its path here."""
     here = [f"{tree}/{c}" for c in d["cells"]]
     fields = [("name", starlark(name)), ("source", starlark(label)), ("kind", starlark(d["kind"])),
               ("device", starlark(bool(d.get("device")))), ("executor", starlark(d["executor"])),
               ("params", starlark(json.dumps(d["params"], sort_keys=True))), ("binds", starlark(d["binds"])),
               ("cells", starlark(here)), ("root", starlark(f"{tree}/{d['bundle']['root']}")),
-              ("manifest", starlark(f"{tree}/{d['bundle']['manifest']}")), ("python", starlark(d["bundle"]["python"])),
+              ("manifest", starlark(f"{tree}/{d['bundle']['manifest']}")), ("venv", starlark(venv)),
               ("tree", starlark(":tree"))]
     return "exported_entry(\n" + "".join(f"    {k} = {v},\n" for k, v in fields) + ")\n"
 
@@ -139,11 +141,18 @@ def export(checkout: Path, out: Path, *, cquery: Path, packages: list[str], comm
     for t, name in zip(targets, names, strict=True):
         d = json.loads(source(t["description"], checkout, execroot, output_base).read_text())
         label = "//" + t["label"].split("//", 1)[1]
-        build.append(exported(name, label, d, "tree"))
+        #: the bundle's environment: a link here to the store venv its mark resolves to, named by the venv's key, so the
+        #: exported description names it by its path in this repository and never by the store's
+        venv = Path(os.path.realpath(files[d["bundle"]["venv"]])).parent
+        link = out / "venvs" / venv.name
+        if not link.is_symlink():
+            link.parent.mkdir(parents=True, exist_ok=True)
+            link.symlink_to(venv)
+        build.append(exported(name, label, d, "tree", f"venvs/{venv.name}/.complete"))
         cells = [json.loads((out / "tree" / c).read_text())["name"] for c in d["cells"]]
         entries[name] = {"source": label, "kind": d["kind"], "device": bool(d.get("device")), "executor": d["executor"],
                          "params": d["params"], "cells": cells}
-        venvs.add(str(Path(d["bundle"]["python"]).parents[1]))
+        venvs.add(str(venv))
     if commit:
         #: a commit's server has nothing more to build: its memory goes back to the machine now
         _bazel(checkout, "shutdown")
