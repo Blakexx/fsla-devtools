@@ -27,7 +27,7 @@ POINTER = "FSLA_DEV_CONFIG"
 
 @dataclass(frozen=True)
 class Key:
-    kind: str  #: path, str, int, float, bool or argv; a trailing ? admits null
+    kind: str  #: path, paths (a list of them), str, int, float, bool or argv; a trailing ? admits null
     default: Any
     doc: str
 
@@ -57,6 +57,24 @@ MACHINE: dict[str, dict[str, Key]] = {
                             "down to it"),
         "store_max_age_days": Key("int", 30, "an environment or cached wheel idle this many days is swept"),
         "tools_dir": Key("path", "~/.local/share/fsla/tools", "where fsla's `tools/dev.py init` installs pinned tools"),
+        #: THE MACHINE'S DISK (fsla_devtools.disk): a cap on live worktrees, and a free-space floor under every build
+        "repositories": Key("paths?", None, "the main checkouts of the machine's FSLA repositories, whose linked "
+                            "worktrees the worktree cap counts together; null: every git checkout beside fsla-devtools' "
+                            "own main checkout whose `origin` is an FSLA repository (fsla_devtools.disk.worktrees.NAMES)"),
+        "worktree_cap": Key("int", 16, "the live linked worktrees the machine holds across `repositories`: creating one "
+                            "past it is refused, naming the clean, merged ones to remove"),
+        "bazel_output_roots": Key("paths?", None, "the Bazel output user roots the machine's checkouts build under, where "
+                                  "a worktree's output base is found (its `DO_NOT_BUILD_HERE` names the workspace); "
+                                  "null: Bazel's default, `~/.cache/bazel/_bazel_<user>`"),
+        "free_floor_gb": Key("int", 30, "the free space in GiB each watched filesystem keeps: a build, test or run "
+                             "through the front door is refused, before Bazel starts, while one has less"),
+        "downloads_max_age_days": Key("int?", 30, "a download in Bazel's repository cache (`build_cache`'s "
+                                      "`bazel/repository/content_addressable`) unused this many days is deleted by the "
+                                      "front door, at most once a day; each is refetched by its pinned sha256 when a "
+                                      "fetch needs it. Null: none is deleted"),
+        "watched_filesystems": Key("paths?", None, "paths whose filesystems the free-space floor watches; null: the root "
+                                   "and, under WSL, the Windows drive its virtual disk lives on (the mount that holds "
+                                   "`windows_system32`)"),
         "windows_system32": Key("path?", None, "WSL only: the Windows System32 directory as mounted in Linux"),
         "wsl_lib": Key("path?", None, "WSL only: the Windows driver's Linux libraries (libdxcore, libcuda); the dev "
                        "container mounts their directory's parent read-only (the loader opens the driver store beside "
@@ -87,11 +105,14 @@ def _check(section: str, name: str, key: Key, value: Any) -> Any:
         if optional:
             return None
         raise SystemExit(f"{where} may not be null ({key.doc})")
+    strings = isinstance(value, list) and all(isinstance(x, str) for x in value)
     ok = {"path": isinstance(value, str), "str": isinstance(value, str), "int": isinstance(value, int)
           and not isinstance(value, bool), "float": isinstance(value, (int, float)) and not isinstance(value, bool),
-          "bool": isinstance(value, bool), "argv": isinstance(value, list) and all(isinstance(x, str) for x in value)}
+          "bool": isinstance(value, bool), "argv": strings, "paths": strings}
     if not ok[kind]:
         raise SystemExit(f"{where} must be {kind}, got {value!r} ({key.doc})")
+    if kind == "paths":
+        return [str(Path(v).expanduser()) for v in value]
     return str(Path(value).expanduser()) if kind == "path" else value
 
 

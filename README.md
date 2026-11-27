@@ -17,6 +17,7 @@ carry it. It is a development dependency: nothing a user installs imports it.
 | `fsla_devtools.config` | the dev config reader: one directory of JSON files a section, every key declared; the machine's `host`, `clock` and `store` sections every repository shares |
 | `fsla_devtools.locks` | the machine's locks: the GPU lock (exclusive or shared), the host-compute budget and named file locks, the SM clock lock (the machine's, counted by its holders) |
 | `fsla_devtools.graph` | the build graph's shared machinery: the front door every repository's Bazel runs through, the environment's store builder, the test tiers' sharding plugin |
+| `fsla_devtools.disk` | the machine's disk, held by the front door: the cap on live worktrees and their removal with their output bases (`bazel --worktree`), the free-space floor under every build, the trim of the repository cache's unused downloads |
 
 The `fsla_devtools` Bazel module (`MODULE.bazel`, `bazel/`) is the rest of the build graph's machinery: its
 environment extension, generic rules and measurement rules (below).
@@ -260,8 +261,9 @@ Every value that depends on the machine lives in one directory of JSON files, on
 directory `FSLA_DEV_CONFIG` names (a container, a test). A schema declares each section's keys with a kind, a default and
 a meaning; a key a file holds that its section does not declare is refused, so a typo fails instead of silently taking
 a default. `fsla_devtools.config.MACHINE` declares the sections every repository shares -- `host` (lock paths, the
-compute budget, niceness), `clock` (the SM clock the harness locks) and `store` (`root`, the data repository's checkout
-the results store writes) -- and `machine("host.gpu_lock")` reads one value.
+compute budget, niceness, the caches and the disk's bounds: [the machine's disk](#the-machines-disk)), `clock` (the SM
+clock the harness locks) and `store` (`root`, the data repository's checkout the results store writes) -- and
+`machine("host.gpu_lock")` reads one value.
 A repository with sections of its own (fsla's toolchain and workspace) reads its whole schema with
 `read(schema, owns_directory=True)`, which also refuses a file no section declares.
 
@@ -298,7 +300,9 @@ Bazel it downloaded; that stub runs `fsla_devtools.graph.front_door`, found thro
 so every Bazel command in a checkout goes through one implementation. It hands Bazel the machine's settings from the
 dev config (the shared caches and the environment's store), overrides the repository's pin of this module with the
 machine's checkout (an rc file of the workspace's own), so a change made here is the one every graph on the machine
-runs, and holds the host budget around each build phase. `bazel --commit-gate` is the commit gate below.
+runs, and holds the host budget around each build phase. It holds the machine's disk ([below](#the-machines-disk)): a
+build, test or run is refused under the free-space floor, `bazel --worktree ...` is the worktree tool, and every command
+first trims the repository cache's unused downloads when a trim is due. `bazel --commit-gate` is the commit gate below.
 
 **The environment extension** (`bazel/environment.bzl`). Its tags make the repositories a graph runs on:
 
@@ -347,6 +351,55 @@ index as a build output (`results_index`), a data repository's.
 **The measurement rules** (`bazel/measure.bzl`): a cell's description (`cell`), a timing entry with its bundle
 (`timing_entry`) and an interleaved session over entries that `bazel run` measures and stores (`interleaved_timing`),
 [above](#timing).
+
+## <a id="the-machines-disk"></a>The machine's disk
+
+A development machine fills its disk with what the checkouts leave behind: worktrees, each with a Bazel output base
+(2-4 GB in fsla) that Bazel keeps after the checkout is gone, and downloads nothing deletes. Under WSL a peak is
+permanent until it is undone by hand: WSL's virtual disk only grows, so its Windows drive keeps the space until the disk
+is compacted. The front door holds three things against it, each read from the dev config's `host` section, none
+starting a Bazel build (`fsla_devtools.disk`).
+
+**The worktree cap.** The machine holds at most `host.worktree_cap` (16) live linked worktrees across its FSLA
+repositories together: `host.repositories`, or by default every git checkout beside fsla-devtools' main checkout whose
+`origin` is one of fsla, fsla-devtools, warpline, fsla-results and fsla-bench (a checkout's folder may have any name).
+
+```bash
+bazel --worktree list                          # every live linked worktree, oldest first: clean or dirty, merged or not
+bazel --worktree add <path> <commit> [-b BR]   # a worktree of this checkout's repository, refused past the cap
+bazel --worktree remove                        # THIS worktree, the checkout the command runs in
+bazel --worktree remove <path> [--force]       # another one, by its path
+```
+
+An add past the cap is refused, and the refusal lists the worktrees that can go -- clean (no tracked change, no
+untracked file), merged into their repository's default branch (`origin/HEAD`'s, else `main` or `master`) and not
+locked, oldest first by when git last wrote their index -- with the command that removes one. A removal expunges the
+worktree's Bazel output base first (`bazel clean --expunge` in it, which stops its server; the base is found in the
+output user roots, `host.bazel_output_roots` or Bazel's default, by its `DO_NOT_BUILD_HERE`), then removes the checkout
+(`git worktree remove`); a base the expunge leaves keeps the worktree. It refuses a dirty or unmerged worktree unless
+named by its path with `--force`, a locked one, and a main checkout always. A repository's own worktree command creates
+through `add` and keeps its own set-up steps after (fsla's `bazel run //:worktree`). The census reads git without
+writing an index (`--no-optional-locks`), and an add holds the machine's `worktrees` file lock, so two adds never both
+pass the cap.
+
+**The free-space floor.** A `build`, `test` or `run` is refused before Bazel starts while a watched filesystem has less
+free than `host.free_floor_gb` (30 GiB): `host.watched_filesystems`, or by default the root and, under WSL, the Windows
+drive WSL's virtual disk lives on -- the mount that holds `host.windows_system32`. The refusal names each filesystem, its
+free space and the floor, and what the worktree tool would free (the clean, merged worktrees and their output bases,
+measured by `du`), and says when space freed inside WSL returns to the Windows drive only after a compaction. The one
+override is an environment variable that says why: `DISK_FLOOR_OVERRIDE="<why>" bazel build ...` (the name the
+machine's memory guard reads for its own floor). Every other command -- `clean`, `shutdown`, `query`, the worktree
+tool -- runs under the floor, so a full disk can still be freed.
+
+**The download trim.** Bazel's repository cache (`host.build_cache`'s `bazel/repository`, the machine's one
+`--repository_cache`) keeps every archive a repository rule downloads, by the sha256 the rule pins it to, and deletes
+none. Every Bazel command through the front door deletes the downloads (`content_addressable/`) unused for
+`host.downloads_max_age_days` (30), at most once a day (a stamp's time is all it reads when none is due), under a lock
+a second trimmer does not wait for, and prints one line of what it deleted. A download is safe to delete: the next
+fetch that needs it downloads it again and checks it against the same pinned digest, so a deletion costs a download,
+never a different result. "Unused" is the entry's `file`'s modification time, which Bazel 9.3 updates on every cache
+hit. The repo contents cache beside it (`contents/`) is Bazel's own to collect (`--repo_contents_cache_gc_max_age`), and
+nothing else of a cache is deleted. Null `host.downloads_max_age_days` trims nothing.
 
 ## Tests and the gate
 

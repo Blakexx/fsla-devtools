@@ -10,6 +10,12 @@ runs and nothing names a machine path. It runs every BUILD under the host budget
 command's build phase holds the slots free when it starts, at least one, and runs one compile job a `host.nvcc_threads`
 of them; its test or run phase holds none, so a test or a measurement takes its own locks as it does outside the graph
 -- a GPU test under a held budget is the deadlock the host's lock order exists to prevent.
+
+It holds the machine's disk (`fsla_devtools.disk`): a build, test or run is refused before Bazel starts while a watched
+filesystem is under the free-space floor (`disk.floor`), and `bazel --worktree ...` is the worktree tool (`disk.worktrees`:
+the cap, the census, a removal that takes the output base with it), which starts no Bazel build; and every Bazel
+command first trims the repository cache's downloads unused for `host.downloads_max_age_days`, at most once a day
+(`disk.downloads`).
 """
 from __future__ import annotations
 
@@ -22,6 +28,7 @@ import tempfile
 from pathlib import Path
 
 from fsla_devtools import config
+from fsla_devtools.disk import downloads, floor, worktrees
 from fsla_devtools.locks import host
 
 #: the commands whose whole run is a build, and those whose build comes before a phase that holds no budget
@@ -160,17 +167,22 @@ def commit_gate(workspace: Path) -> int:
 
 def main(argv: list[str], workspace: Path) -> int:
     """The front door for the workspace at `workspace` (the stub's repository); `--commit-gate`, the commit hook's run
-    of its gate (`commit_gate`)."""
+    of its gate (`commit_gate`); `--worktree ...`, the worktree tool (`fsla_devtools.disk.worktrees`)."""
     if argv == ["--commit-gate"]:
         return commit_gate(workspace)
+    if argv[:1] == ["--worktree"]:
+        return worktrees.main(argv[1:], workspace)
     real = os.environ.get("BAZEL_REAL")
     if not real:
         raise SystemExit("bazel/bazel is the graph's front door, which bazelisk runs in Bazel's place: run `bazel`, the "
                          "pinned bazelisk")
+    downloads.trim_if_due()
     startup, command, rest = _split(argv)
     if command == "coverage":
         raise SystemExit("bazel coverage is refused: its instrumented build differs from the budgeted one and would run "
                          "outside the host budget, and the graph has no coverage target")
+    if command in floor.FLOORED:
+        floor.hold(command)
     own = workspace_rc(workspace)
     head = [real, *startup, f"--bazelrc={machine_rc()}", *([f"--bazelrc={own}"] if own else [])]
     if command in BUILDS:
