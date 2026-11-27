@@ -81,7 +81,7 @@ class Session(unittest.TestCase):
 
     def manifest(self, entries, claim="unlocked", clock=None) -> dict:
         return {"session": "//measure:session", "claim": claim, "rounds": 2, "reps": 3, "warmup": 10,
-                "location": "timing/session", "entries": entries, "clock": clock}
+                "label": "@fsla//measure:session", "entries": entries, "clock": clock}
 
     def measure(self, manifest: dict, run: str = "run-1"):
         return session.measure(manifest, self.runfiles, run=run, scratch=self.tmp / "scratch" / run,
@@ -168,15 +168,15 @@ class Session(unittest.TestCase):
         records = self.tmp / "records"
         done = self.run_program("--store-root", str(records))
         self.assertEqual(done.returncode, 0, done.stderr)
-        (record,) = Store("timing/session", records).records()
-        semantics, (sample,) = record["semantics"], record["samples"]
+        (sample,) = Store("@fsla//measure:session", records).samples()
+        semantics = sample["semantics"]
         self.assertEqual([e["owner"] for e in semantics["entries"]], ["//measure:fast"])
         self.assertEqual(semantics["entries"][0]["bundle"], {"digest": "d" * 64, "environment": "env0"})
         self.assertEqual(semantics["entries"][0]["cells"][0]["name"], "t8")
         self.assertEqual((semantics["clock"], semantics["rounds"], semantics["reps"]), ("unlocked", 2, 3))
         self.assertEqual(sample["provenance"]["checkouts"], {"//measure:fast": STAMP})
         self.assertEqual(sample["summary"]["samples"], 2 * 3)
-        stored = json.loads((Store("timing/session", records).output(record)).read_text())
+        stored = json.loads((Store("@fsla//measure:session", records).output(sample)).read_text())
         self.assertEqual(stored["seed"], session.seed_of(sample["run"]))
         self.assertEqual(list((self.tmp / "scratch" / "timing").iterdir()), [])
 

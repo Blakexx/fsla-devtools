@@ -319,7 +319,7 @@ _tree_repo = repository_rule(
 
 #: what of a data repository's commit is data: everything else is its own graph (its gate), not this one's, and is
 #: dropped; the repository's BUILD file is `data.BUILD`
-_DATA = ("lab", "records")
+_DATA = ("records",)
 
 def _data_impl(rctx):
     name = rctx.attr.remote.rstrip("/").split("/")[-1]
@@ -343,7 +343,7 @@ _data_attrs = {
 _data_repo = repository_rule(
     implementation = _data_impl,
     attrs = _data_attrs | {"_build": attr.label(default = "//bazel:data.BUILD")},
-    doc = "The data repository at one commit, by its archive's digest: its `records/` and `lab/`, nothing of its graph.",
+    doc = "The data repository at one commit, by its archive's digest: its `records/`, nothing of its graph.",
 )
 
 _CELLS_BUILD = """\

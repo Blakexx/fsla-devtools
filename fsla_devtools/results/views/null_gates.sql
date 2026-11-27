@@ -1,9 +1,9 @@
--- Every cell of every stored null gate (fsla-devtools' `measure_null_gate`, stored at `timing/null`): one registration's
+-- Every cell of every stored null gate (fsla-devtools' `measure_null_gate`, stored at its target's label): one registration's
 -- entry timed against a copy of itself in a second worker. `trusted` is 1 when the per-rep ratios of the two copies put
 -- one inside their interquartile range, 0 when they find a worker's bias, null when a copy could not run (`error`).
 CREATE VIEW null_gates AS
-SELECT s.location, s.key, s.n, s.utc,
-       json_extract(s.provenance, '$.run') AS run,
+SELECT s.label AS target, s.key, s.utc,
+       s.run AS run,
        c.key AS cell,
        json_extract(c.value, '$.trusted') AS trusted,
        json_extract(c.value, '$.ratio_median') AS ratio_median,

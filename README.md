@@ -12,7 +12,7 @@ carry it. It is a development dependency: nothing a user installs imports it.
 | `fsla_devtools.build` | the declared build system: targets declared by composable functions in files, keyed by what they read, cached or run in dependency order, holding the machine's resources, each in its own environment's worker |
 | `fsla_devtools.timing` | the timing system: the session program a Bazel run target starts (`fsla_devtools.timing.session`: interleaved, clock-locked, stored) and its entry workers; and, as targets of the declared build system, a server of entry workers, registrations of timed callables on cells, sessions, memory passes, null gates |
 | `fsla_devtools.diff` | the diff targets: two executors run over the same cells in the environments they name, compared under one rule (bit-identity, the per-slot clause rule, support equality), with a claim the build can fail on -- a difference expected or refused |
-| `fsla_devtools.results` | the results store's code: records under a location, keyed by their semantics, every sample kept, in the data repository (fsla-results); its index and views, the verdict (whether a candidate's timing is a regression against a reference timed in the same sessions), the instruments' deltas and the dashboard |
+| `fsla_devtools.results` | the results store's code: one file a sample under its producing target's label, every sample kept, in the data repository (fsla-results); its index and views, the verdict (whether a candidate's timing is a regression against a reference timed in the same sessions), the instruments' deltas and the dashboard |
 | `fsla_devtools.instrument` | an instrument run: a tool over the files it reads, laid out as a tree of copies, its JSON (or its refusal) the output; what the `instrument` rule's action runs, and a store target's run for an instrument on the device |
 | `fsla_devtools.record` | the record of a build output: the program a `results_store` run target starts, storing each output file unless its record already holds it |
 | `fsla_devtools.store` | the store target of the declared build system: a result written through `fsla_devtools.results` as a run-stamped sample of its source's record |
@@ -134,12 +134,12 @@ reads, files `layout` puts where the code reads them) and `<name>.bundle.json`: 
 branch, checkout name and uncommitted diff digest its `--workspace_status_command` writes as `STABLE_GIT_COMMIT`,
 `STABLE_GIT_BRANCH`, `STABLE_GIT_DIFF_SHA256`, `STABLE_CHECKOUT`; a workspace that stamps none is refused), the digest of
 every file the bundle holds, and its environment. `kind = "clock"` is the in-kernel clock read that proves a session's
-lock. An `interleaved_timing` names entries, a clock reader, `rounds`, `reps`, `warmup`, the store's `location` and a
-`claim`, and `bazel run` starts the SESSION PROGRAM (`python -m fsla_devtools.timing.session`, on the checkout's own
+lock. An `interleaved_timing` names entries, a clock reader, `rounds`, `reps`, `warmup`, its `workspace` (the session is
+stored at its own label) and a `claim`, and `bazel run` starts the SESSION PROGRAM (`python -m fsla_devtools.timing.session`, on the checkout's own
 venv) on its manifest:
 
 ```bash
-bazel run //measure:session_entmax                     # measure, store one timing/session sample
+bazel run //measure:session_entmax                     # measure, store one sample at @fsla//measure:session_entmax
 bazel run //measure:session_entmax -- --no-store       # measure, keep session.json in the scratch, store nothing
 bazel run //measure:session_entmax -- --store-root DIR --scratch DIR
 ```
@@ -185,13 +185,13 @@ build holds the host budget, and the GPU taken under it deadlocks against a meas
 it runs in the run phase of the store target that records it, in the run's environment, taking the machine's locks
 itself.
 
-**A BUILD OUTPUT'S RECORD** (`results_store`): `src` (any target's files, or an instrument), the store's `location`, and
-`inputs` (what the output depends on beyond an instrument's own). The build writes `<name>.record.json`: the source's
+**A BUILD OUTPUT'S RECORD** (`results_store`): `src` (any target's files, or an instrument), its `workspace` (its samples
+are stored at the store target's own label), and `inputs` (what the output depends on beyond an instrument's own). The build writes `<name>.record.json`: the source's
 label, each output file, the CONTENT DIGEST of every input (each of its files by its path and its bytes' digest) and the
 workspace's stamp, refusing a workspace that stamps no commit. `bazel run` starts `fsla_devtools.record`, which stores
-each file as one record -- its SEMANTICS the source, the file's name, the inputs' digests and an instrument's
-arguments; its PROVENANCE the run and the stamped commit -- and ASKS THE STORE first (`Store.put(..., unless_stored=True)`):
-when the record already holds this outcome nothing is stored, so a second run over the same build stores nothing into
+each file as one sample at the store target's label -- its SEMANTICS the source, the file's name, the inputs' digests
+and an instrument's arguments; its PROVENANCE the run and the stamped commit -- and ASKS THE STORE first
+(`Store.put(..., unless_stored=True)`): when a sample of that key already holds this outcome nothing is stored, so a second run over the same build stores nothing into
 whichever store it is pointed at. An instrument's refusal is a failed sample, `refused: WHY`. A record names another
 repository by its own name (`@warpline`, `@host_gpu`), never the canonical name Bazel derives, which moves with Bazel's
 release and the module graph.
@@ -233,65 +233,87 @@ side ran measured nothing.
 
 Every measuring tool stores what it measured through one library, `fsla_devtools.results`; the records themselves are
 the data repository's (fsla-results, a repository of data and no code), at the checkout the dev config's `store.root`
-names.
+names. The store is a durable index of what Bazel's targets produced (Blake, 2026-11-27: "whatever the thing you ran to
+get that output is the key itself"): a sample is filed under the LABEL of the target that produced it.
 
 ```python
-from fsla_devtools.results import Store, checkout
+from fsla_devtools.results import Store, checkout, key, run_id
 
-store = Store("mqar/local")                        # the tool's own location, under store.root's records/
-semantics = {"bench": "mqar", "config": "local", "cell": "d1-n256", "local": checkouts}
-store.put(semantics, output=rows, wall_s=12.3, provenance=checkout(worktree))
+store = Store("@fsla//measure:store_oracle_tier")  # the producing target's label, under store.root's records/
+store.put(semantics, output=rows, wall_s=12.3, provenance=checkout(worktree), run=run_id())
 store.put(semantics, error="RuntimeError: ...")    # a failure is a sample too
-store.put(semantics, output_file=path, unless_stored=True)   # None, storing nothing, when the record holds the outcome
-record = store.get(key(semantics))                  # Store.complete(record), store.output(record)
+store.put(semantics, output_file=path, unless_stored=True)   # None, storing nothing, when a sample of the key holds it
+store.put(semantics, output_file=result, parts={"trace/row0.json": row})   # the files the same run wrote beside it
+store.put(semantics, output_file=session, provenance=provenance, timing=True)  # a timing: refused without its commits
+store.samples(key(semantics))                       # newest first; store.output(sample), store.parts(sample)
 ```
 
-- **A location** names who stores: `fsla/sass`, `timing/session`, `mqar/<config>`.
-- **A record** is everything kept under one key: the semantics the tool handed over and every sample.
-- **The key** is sha256 over the semantics, so a repeat lands on the same record and a changed input on a new one.
-- **A sample** is one execution: its output (JSON, or a file moved in) or its error, when, how long, its provenance
-  (the checkouts and commits the tool names; the host).
+- **A label** names who produced it: `@<workspace>//<package>:<target>`, the workspace the repository's module name
+  (`@fsla//measure:session_entmax`, `@fsla//measure/lab:add_rate.run`, `@fsla//:container_check`). Every store rule
+  passes its own (`workspace = native.module_name()`); a program that stores names the target it is run by.
+- **A sample** is one execution, one file named by its RUN (`run_id()`: `<YYYYMMDDTHHMMSSZ>-<8 hex>`, so a folder sorts
+  oldest first): its SEMANTICS (what it is a measurement of) and their digest, the KEY; its output (JSON, or a file moved
+  in) or its error; when, how long; its provenance (the checkouts and commits the tool names; the host); and its PARTS
+  -- the files the same execution wrote beside its output (a traced row, a profiler's dump), each moved in under its
+  name (a relative path of plain names) and listed in the sample's `parts`.
+- **The key** is sha256 over the semantics: a reader that compares groups a label's samples by it, and a changed input
+  is another key.
+- **A sample is written once**: its folder and then its file are created exclusively, so no lock is taken, no file is
+  rewritten and no lock file is ever in the tree; a run that exists is refused.
 
-    records/<location>/<key>.json            the record (format 1: key, location, format, semantics, samples)
-    records/<location>/<key>.<n>.out.<ext>   sample n's output
+    records/<workspace>/<package>/<target>/<run>.json            a sample (format 2: format, label, key, semantics, run,
+                                                                 utc, ok, wall_s, provenance, output or error, parts)
+    records/<workspace>/<package>/<target>/<run>/output.<ext>    its output
+    records/<workspace>/<package>/<target>/<run>/<name>          its parts
 
-Nothing derived from two records (a ratio, a baseline) is stored: that is the reader's. **A record carries no machine
+Nothing derived from two samples (a ratio, a baseline) is stored: that is the reader's. **A record carries no machine
 path**: a path inside a home directory in anything stored is refused at `put` -- a person's, a container's or a rented
 box's alike -- since a record is read on other machines and published; a file is named by its path inside its checkout
 (`portable(text, *checkouts)` rewrites a message) and a checkout by `checkout()`, its directory's name, branch, HEAD and
 the digest of its uncommitted diff. A git call that fails is a failure, never "clean, no commit". **A timing names its
-commits**: a sample at a `timing/...` location whose provenance's `checkouts` does not give every checkout's `git_sha` is
+commits**: a sample stored with `timing=True` whose provenance's `checkouts` does not give every checkout's `git_sha` is
 refused. A MACHINE PATH is a path inside someone's home directory (`/home/<user>`, `/Users/<user>`, `/root`, a Windows user
 folder); a system path (`/opt/venv/bin/python`) is a fact of the environment and is kept. The rule is the writer's, refused
-where a sample is written: `check(root)` recomputes every key, holds every location to its directory and every successful
-sample to its output, and reads no record's content, since a stored record is never rewritten; `check_files(directory)`
-holds a directory of files kept as written (the data repository's `lab/`) to parsing.
+where a sample is written: `check(root)` holds every file to a sample under its label's folder or in a sample's folder,
+every sample to its label, its run, its format and a key that recomputes, every success to its output and its parts and
+every failure to its error, refuses a lock or a write in progress and a target's folder under another's, and reads no
+sample's output, since a stored sample is never rewritten.
 
-**The index** (`fsla_devtools.results.index`) is the records as one SQLite database, derived: `records(location, key,
-format, semantics)` and `samples(location, key, n, ok, utc, wall_s, provenance, error, output_path, output, extra)`, the
-JSON fields read with SQLite's JSON functions, and a tool's shape a view in `fsla_devtools/results/views/`, created after
+**A RE-FILED SAMPLE** is bytes kept before the store held them, written as a sample of the label that produces them
+(`Store.refile`, and `refile`, `fsla_devtools/results/refile.py`, over a plan of many): a file a data repository kept as
+written (`backfilled`), or a sample of the store's earlier layout (`migrated`). Its bytes are copied in unchanged as
+the output and the files they belong with as its parts, its `utc` the date they state, its provenance what they state
+(no host: the machine that re-files ran nothing), and the sample marked with where they were kept and the data
+repository's commit, and the machine paths the bytes carry, stated, never refused, since nothing is rewritten. A reader
+tells a re-filed sample from one the store wrote at run time by that mark. The plan is written by whoever knows what
+the files mean -- the store knows nothing of a tool's files: each sample's label, run, semantics, date, provenance,
+mark, output and parts. A run the label already holds is written again by nothing, and the re-filing writes a table, a
+line a file: its sha256 and the stored file's, `identical` only where they are equal; it fails when any is not.
+
+**The index** (`fsla_devtools.results.index`) is the samples as one SQLite database, derived: `samples(label, run, key,
+ok, utc, wall_s, semantics, provenance, error, output_path, output, extra)`, a row a sample, the JSON fields read with SQLite's JSON functions, and a tool's shape a view in `fsla_devtools/results/views/`, created after
 every index (a view that left the package leaves the database). A query's database is a cache of the machine
 (`results/<12 hex of the records path>/index.sqlite` under `host.build_cache`), rebuilt incrementally; the data
 repository's own index is a build output (`results_index`, `bazel/results.bzl`), never a file beside the records.
 
 | view | from | one row per |
 |---|---|---|
-| `timing_members` | `timing/session` (`measure_timing`, through a store target) | member of a stored session: the run, the session, its registration (`owner`), the label and arm read from it, the cell, the LEVEL it prices (`kernel`, `op`, `layer`), whether it ran and why not, device, torch, the owner's commit and diff, the session's rounds, reps and clock reads |
+| `timing_members` | every session's samples (an output with `members` and `samples`, at its session's label) | member of a stored session: the run, the session, its registration (`owner`), the label and arm read from it, the cell, the LEVEL it prices (`kernel`, `op`, `layer`), whether it ran and why not, device, torch, the owner's commit and diff, the session's rounds, reps and clock reads |
 | `timing_samples` | `timing_members` | timed call, in the order taken: its member's label, arm and cell, its round, rep and position in the rep's random order, and its milliseconds |
-| `memory_rows` | `timing/memory` (`measure_memory`) | timing entry alone on a central cell: peak allocated and reserved bytes, what was allocated before the build and after the calls, bytes held outside the caching allocator and the totals with them, label, arm, commit |
-| `instrument_cells` | `fsla/<instrument>` (the declared build system's per-cell instrument targets) | cell of an instrument run: the run, whether the tool ran on it, and its exit and error when it could not |
-| `instrument_metrics` | `fsla/<instrument>` | every NUMBER a declared instrument recorded, one row each, in long form: the run, the cell (NULL for the whole-binary `sass`), a dotted `metric` (`sass.<cubin>.<function>.<count>`) and its value |
-| `diff_cells` | `fsla/<name>` and `diff/<surface>` (the diff targets) | cell and quantity of a stored diff: the claim and whether it `held`, the cell's status (`ok`, `unusable`, `refused`) and why, and the quantity's verdict with why it differs and its worst slot |
-| `null_gates` | `timing/null` (`measure_null_gate`) | cell of a null gate: the run, whether the entry's two workers agree, the ratio's median and quartiles |
+| `memory_rows` | every memory pass (`measure_memory`, at its label) | timing entry alone on a central cell: peak allocated and reserved bytes, what was allocated before the build and after the calls, bytes held outside the caching allocator and the totals with them, label, arm, commit |
+| `instrument_cells` | every per-cell instrument's samples (a `summary.cells`, at its store target's label) | cell of an instrument run: the run, whether the tool ran on it, and its exit and error when it could not |
+| `instrument_metrics` | every build output's record (semantics with `inputs`) | every NUMBER a declared instrument recorded, one row each, in long form: the run, the cell (NULL for the whole-binary `sass`), a dotted `metric` (`sass.<cubin>.<function>.<count>`) and its value |
+| `diff_cells` | every diff's samples (an output with `cells`, at its target's label) | cell and quantity of a stored diff: the claim and whether it `held`, the cell's status (`ok`, `unusable`, `refused`) and why, and the quantity's verdict with why it differs and its worst slot |
+| `null_gates` | every null gate (`measure_null_gate`, at its label) | cell of a null gate: the run, whether the entry's two workers agree, the ratio's median and quartiles |
 | `cells` | fleet and local grids | stored grid cell: bench, config, cell, image or local checkouts, row |
 
 ```bash
 python -m fsla_devtools.results [--root RECORDS] check   # the default root: store.root's records/
-python -m fsla_devtools.results check-files DIR
-python -m fsla_devtools.results show [LOCATION]
+python -m fsla_devtools.results --root RECORDS refile --plan PLAN --from CHECKOUT --table TABLE
+python -m fsla_devtools.results show [LABEL]
 python -m fsla_devtools.results index [--db FILE]
 python -m fsla_devtools.results sql "SELECT ..."
-python -m fsla_devtools.results history|latest LOCATION [--where PATH=VALUE]
+python -m fsla_devtools.results history|latest LABEL [--where PATH=VALUE]
 python -m fsla_devtools.results verdict --reference LABEL [--candidate LABEL] [--cell C] [--arm A]
 python -m fsla_devtools.results instruments --baseline RUN [--run RUN]
 python -m fsla_devtools.results dashboard --out suite.html [--reference LABEL] [--run RUN]
@@ -399,7 +421,7 @@ first trims the repository cache's unused downloads when a trim is due. `bazel -
 | `cuda_toolkit` | a CUDA toolkit from NVIDIA's redistributables, pinned by their manifest's digest (which carries each component's) |
 | `host_cc`, `host_gpu` | the host C++ compiler's and the machine's devices' identities, which actions that depend on them are keyed on |
 | `tree` | the checkout's tracked files (`git ls-files`; the commit's index under the commit gate) |
-| `data` | the data repository at one commit (`remote`, `commit`, the `sha256` of the commit's archive): its `records/` and `lab/`, as `:records`, `:lab`, each file by its path, and `:root` (its BUILD file, which names the root) (`bazel/data.BUILD`), nothing of its own graph -- what a workspace's citations and readers take, fixed content at the pin |
+| `data` | the data repository at one commit (`remote`, `commit`, the `sha256` of the commit's archive): its `records/`, as `:records`, each file by its path, and `:root` (its BUILD file, which names the root) (`bazel/data.BUILD`), nothing of its own graph -- what a workspace's citations and readers take, fixed content at the pin |
 | `cells` | every central cell's description as a target (`@<name>//:<cell>`, a `cell` of `bazel/measure.bzl`), generated from this module's registry on the machine's `python3` |
 | `docrefs` | the doc references' tool as `@<name>//:docrefs.py`, a copy of `fsla_devtools/docrefs.py` a workspace's `docrefs_test` runs ([below](#the-doc-references)) |
 
@@ -437,13 +459,14 @@ run target (`tool_run`), a package's part of the tree (`tree_part`), the pytest 
 and the Bazel release check (`bazel_version_test`). Each takes the workspace's environment as an
 argument; a workspace wraps them once with its own. A check over the tree or a tier that reads another repository's
 files names it in `repos` (a label of it -> a variable): its files join the runfiles and its root is exported as that
-variable (`{"@fsla_data//:lab": "FSLA_DATA"}`, the pinned data). **The results store's rules** (`bazel/results.bzl`): the records'
+variable (`{"@fsla_data//:records": "FSLA_DATA"}`, the pinned data). **The results store's rules** (`bazel/results.bzl`): the records'
 index as a build output (`results_index`), a data repository's.
 
 **The measurement rules** (`bazel/measure.bzl`): a cell's description (`cell`), a timing entry with its bundle
 (`timing_entry`) and an interleaved session over entries that `bazel run` measures and stores (`interleaved_timing`),
 [above](#timing); an instrument (`instrument`) and a build output's record that `bazel run` stores (`results_store`),
-[above](#instruments).
+[above](#instruments); and the workspace's stamp alone (`workspace_stamp`, `<name>.stamp.json`, refusing a workspace that
+stamps no commit), the provenance of what a program run by `bazel run` measures and stores itself (fsla's lab).
 
 ## <a id="the-machines-disk"></a>The machine's disk
 

@@ -1,12 +1,12 @@
--- EVERY CELL OF EVERY STORED DIFF (fsla-devtools' diff targets: a checkout's own kernel-vs-oracle at
--- `fsla/<name>`, the suite's cross-checkout diffs at `diff/<surface>`): one row per (sample, cell, quantity).
+-- EVERY CELL OF EVERY STORED DIFF (fsla-devtools' diff targets: a checkout's own kernel-vs-oracle, the suite's
+-- cross-checkout diffs, each at its target's label, `target`): one row per (sample, cell, quantity).
 -- `held` is the diff's claim as a whole (its `expect`, `same` or `different`, kept over every cell and the count);
 -- `cell_status` is `ok`, `unusable` (one side could not produce the cell, or the two drew it with different code) or
 -- `refused` (neither side produced it), and `why` says which; `same` is the quantity's own verdict under the strategy,
 -- with why it differs (`quantity_why`) and the worst slot (`ratio` of its error to its allowance, `at`, `bound_by`)
 -- where it failed. A diff stores verdicts and never the tensors.
 CREATE VIEW diff_cells AS
-SELECT s.location, s.key, s.n, s.utc,
+SELECT s.label AS target, s.key, s.utc,
        json_extract(s.provenance, '$.run') AS run,
        json_extract(s.output, '$.strategy') AS strategy,
        json_extract(s.output, '$.expect') AS expect,
@@ -27,4 +27,4 @@ SELECT s.location, s.key, s.n, s.utc,
        json_extract(q.value, '$.bound_by') AS bound_by
 FROM samples s, json_each(s.output, '$.cells') c
      LEFT JOIN json_each(c.value, '$.quantities') q
-WHERE s.ok AND (s.location LIKE 'diff/%' OR s.location LIKE 'fsla/%-vs-%') AND json_type(s.output, '$.cells') = 'object';
+WHERE s.ok AND json_type(s.output, '$.cells') = 'object';

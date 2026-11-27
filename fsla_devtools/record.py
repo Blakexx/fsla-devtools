@@ -5,12 +5,13 @@ sample of the record its semantics key, unless the record already holds it.
     bazel run //measure:store_oracle_tier [-- --no-store] [--scratch DIR]
     python -m fsla_devtools.record --runfiles DIR --record PATH [...]   # what the target's launcher runs
 
-`bazel/measure.bzl`'s `results_store` builds `<name>.record.json`: the source's label, the store's location, the digest of
-every input the source's output depends on (the `inputs` it names, and an instrument's tool, files and device identity),
-each output file of the source, and the workspace's stamp. Each output file is one record: its SEMANTICS are the source,
-the file's name, the inputs' digests (and an instrument's arguments), so the same output of the same inputs keys the same
-record; its PROVENANCE is the run and the stamped commit. The store is ASKED whether the record already holds the outcome
-(`Store.put(..., unless_stored=True)`), and nothing is stored when it does: a second run over the same build stores
+`bazel/measure.bzl`'s `results_store` builds `<name>.record.json`: the source's label, the store target's own label
+(which keys its samples), the digest of every input the source's output depends on (the `inputs` it names, and an
+instrument's tool, files and device identity), each output file of the source, and the workspace's stamp. Each output
+file is one sample: its SEMANTICS are the source, the file's name, the inputs' digests (and an instrument's arguments),
+so the same output of the same inputs has the same key; its PROVENANCE is the run and the stamped commit. The store is
+ASKED whether a sample of that key already holds the outcome (`Store.put(..., unless_stored=True)`), and nothing is
+stored when one does: a second run over the same build stores
 nothing, into whatever store it is pointed at. An instrument's refusal (`{"refused": WHY}`) is stored as a failed sample
 naming why. A source that is an instrument on the device runs here first (`fsla_devtools.instrument`), in the run phase,
 which holds no host budget; its output is written into the scratch directory and deleted once stored.
@@ -25,8 +26,7 @@ from pathlib import Path
 
 from .config import machine
 from .instrument import REFUSED, run
-from .results import Store
-from .timing.session import run_id
+from .results import Store, run_id
 
 
 def semantics(record: dict, output: dict) -> dict:
@@ -47,15 +47,18 @@ def outcome(record: dict, path: Path) -> dict:
 
 
 def store(record: dict, files: dict[str, Path], *, root: str | None, run: str, scratch: Path) -> list[dict | None]:
-    """Each output stored at the record's location, a copy of its file moved in; None where the record held it."""
+    """Each output stored at the store target's label (one sample an output, its run the run's, `.<i>` after it where
+    the source builds several), a copy of its file moved in; None where the label holds it."""
     provenance = {"run": run, "checkouts": {record["source"]: record["stamp"]}}
     stored = []
-    for output in record["outputs"]:
+    several = len(record["outputs"]) > 1
+    for i, output in enumerate(record["outputs"]):
         copy = scratch / "stored" / output["name"]
         copy.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(files[output["name"]], copy)
-        sample = Store(record["location"], root).put(semantics(record, output), provenance=provenance, run=run,
-                                                     unless_stored=True, **outcome(record, copy))
+        sample = Store(record["label"], root).put(semantics(record, output), provenance=provenance,
+                                                  run=f"{run}.{i}" if several else run, unless_stored=True,
+                                                  **outcome(record, copy))
         copy.unlink(missing_ok=True)
         stored.append(sample)
     return stored
@@ -95,9 +98,9 @@ def main(argv: list[str]) -> int:
         return 0
     for output, sample in zip(record["outputs"], store(record, files, root=a.store_root, run=run, scratch=scratch),
                               strict=True):
-        where = f"{record['location']} {output['name']}"
+        where = f"{record['label']} {output['name']}"
         print(f"already stored: {where}, the record holds this outcome" if sample is None else
-              f"stored: {where} sample {sample['n']}" + ("" if sample["ok"] else f" ({sample['error']})"))
+              f"stored: {where} sample {sample['run']}" + ("" if sample["ok"] else f" ({sample['error']})"))
     shutil.rmtree(scratch, ignore_errors=True)
     return 0
 

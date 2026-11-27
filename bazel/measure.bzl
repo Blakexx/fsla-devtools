@@ -1,14 +1,15 @@
 """THE MEASUREMENT RULES, every FSLA repository's: a cell's description (`cell`, which the environment extension's `cells`
 tag declares one of a central cell), a timed callable on cells with the bundle of code it runs in (`timing_entry`), an
 interleaved session over entries that `bazel run` starts and stores (`interleaved_timing`), a tool's JSON over the files
-it reads (`instrument`), and the record of a build output that `bazel run` stores (`results_store`). Docs:
-README.md#timing, README.md#instruments.
+it reads (`instrument`), the record of a build output that `bazel run` stores (`results_store`), and the workspace's
+stamp alone (`workspace_stamp`), for a program that stores what it measured itself. Docs: README.md#timing,
+README.md#instruments.
 
     timing_entry(name = "entmax_solve_<cell>", executor = "measure.executors:timed", params = {"arm": ...},
                  cells = ["@fsla_cells//:<cell>"], data = [...], binds = ["fsla_cu13._C"], venv = VENV, python = ...)
     interleaved_timing(name = "session_entmax", entries = [":entmax_solve_<cell>"], clock = ":clock")
     instrument(name = "oracle_tier", tool = "oracle_tier.py", data = [...], devices = "@host_gpu//:identity.txt", venv = VENV)
-    results_store(name = "store_oracle_tier", src = ":oracle_tier", location = "fsla/oracle-tier", venv = VENV, python = ...)
+    results_store(name = "store_oracle_tier", src = ":oracle_tier", workspace = "fsla", venv = VENV, python = ...)
     results_store(name = "store_static_manifest", src = "//:static_manifest", inputs = ["//:library", ...], ...)
 
 An instrument is a tool run over the files it reads, laid out as a tree (`fsla_devtools.instrument`): its JSON, or
@@ -86,6 +87,50 @@ a = ap.parse_args()
 a.out.write_text(json.dumps({"stamp": stamp(a.status), "digest": digest(a.file), "files": len(a.file),
                              "environment": pathlib.PurePath(a.venv).name}, indent=1, sort_keys=True) + "\\n")
 """
+
+#: THE STAMP ALONE: the workspace's stamp as a file, for a program that stores what it measured itself (a lab's run)
+_STAMP_FILE = _STAMP + """\
+ap = argparse.ArgumentParser()
+ap.add_argument("--status", type=pathlib.Path)
+ap.add_argument("--out", type=pathlib.Path)
+a = ap.parse_args()
+a.out.write_text(json.dumps(stamp(a.status), indent=1, sort_keys=True) + "\\n")
+"""
+
+def _workspace_stamp_impl(ctx):
+    out = ctx.actions.declare_file(ctx.label.name + ".stamp.json")
+    args = ctx.actions.args()
+    args.add_all(["-I", "-c", _STAMP_FILE])
+    args.add("--status", ctx.info_file)
+    args.add("--out", out)
+    ctx.actions.run(
+        executable = ctx.file.python,
+        arguments = [args],
+        inputs = [ctx.info_file],
+        outputs = [out],
+        mnemonic = "WorkspaceStamp",
+        progress_message = "Stamping %{label}",
+    )
+    return [DefaultInfo(files = depset([out]), runfiles = ctx.runfiles(files = [out]))]
+
+workspace_stamp = rule(
+    implementation = _workspace_stamp_impl,
+    attrs = {
+        "python": attr.label(mandatory = True, allow_single_file = True, cfg = "exec", doc = "the environment's base " +
+                                                                                             "interpreter"),
+    },
+    doc = "The workspace's stamp as `<name>.stamp.json` (commit, branch, checkout, the digest of its uncommitted diff), " +
+          "refusing a workspace that stamps no commit: the provenance of what a program stores itself.",
+)
+
+def _label(ctx):
+    """The label the store keys what this target produces by: `@<workspace>//<package>:<name>`, the workspace the
+    repository's module name (`workspace`, `native.module_name()` where the target is declared)."""
+    return "@%s//%s:%s" % (ctx.attr.workspace, ctx.label.package, ctx.label.name)
+
+#: the attribute every target that stores takes: its repository's module name
+_WORKSPACE = attr.string(mandatory = True, doc = "the repository's module name (`native.module_name()`): the first part " +
+                                                 "of the label the store keys this target's samples by")
 
 def _rlocation(ctx, f):
     """A file's path in a run target's runfiles."""
@@ -217,7 +262,7 @@ def _interleaved_timing_impl(ctx):
         "rounds": ctx.attr.rounds,
         "reps": ctx.attr.reps,
         "warmup": ctx.attr.warmup,
-        "location": ctx.attr.location,
+        "label": _label(ctx),
         "entries": [_rlocation(ctx, e[TimingEntryInfo].description) for e in ctx.attr.entries],
         "clock": _rlocation(ctx, ctx.attr.clock[TimingEntryInfo].description) if ctx.attr.clock else None,
     }) + "\n")
@@ -235,7 +280,7 @@ interleaved_timing = rule(
         "rounds": attr.int(default = 8),
         "reps": attr.int(default = 11, doc = "odd, so a round's median is a sample"),
         "warmup": attr.int(default = 10, doc = "calls of each member discarded first; at least the program's floor"),
-        "location": attr.string(default = "timing/session", doc = "the store's location the session is kept at"),
+        "workspace": _WORKSPACE,
         "claim": attr.string(doc = "what the session claims of itself; `unlocked` admits a host with no clock lock"),
     },
     doc = "An interleaved timing session over entries: `bazel run` measures and stores it (`-- --no-store`, " +
@@ -323,7 +368,7 @@ instrument = rule(
           "that cannot run writes `{\"refused\": WHY}` and exits 0; one that fails fails.",
 )
 
-#: THE RECORD'S ACTION: the skeleton Starlark wrote (the source, the location, each output file, an instrument's run),
+#: THE RECORD'S ACTION: the skeleton Starlark wrote (the source, the label, each output file, an instrument's run),
 #: with the workspace's stamp and each input's CONTENT DIGEST (every file of it by its path in the tree)
 _RECORD = _STAMP + """\
 ap = argparse.ArgumentParser(fromfile_prefix_chars="@")
@@ -373,7 +418,7 @@ def _results_store_impl(ctx):
     skeleton = ctx.actions.declare_file(ctx.label.name + ".skeleton.json")
     ctx.actions.write(skeleton, json.encode_indent({
         "source": _owner(src.label),
-        "location": ctx.attr.location,
+        "label": _label(ctx),
         "outputs": outputs,
         "instrument": None if instrument == None else {
             "tool": instrument.tool,
@@ -415,7 +460,7 @@ results_store = rule(
     executable = True,
     attrs = {
         "src": attr.label(mandatory = True, doc = "the build output stored: each of its files a record; an instrument"),
-        "location": attr.string(mandatory = True, doc = "the store's location the records are kept at"),
+        "workspace": _WORKSPACE,
         "inputs": attr.label_list(allow_files = True, doc = "what the output depends on, beyond an instrument's own: " +
                                                             "their files' digests key the record"),
         "venv": attr.string(mandatory = True, doc = "the environment's store venv, whose interpreter runs the store"),

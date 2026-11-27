@@ -203,9 +203,9 @@ def classify(sessions: list[dict]) -> dict:
             "n_sessions": len(sessions), "persistence": lasting, "significance": significance}
 
 
-_MEMBERS = """SELECT location, key, n, utc, member, label, arm, cell, level, git_sha, diff_sha256, device
-              FROM timing_members WHERE status = 'ok' AND git_sha IS NOT NULL ORDER BY utc, location, key, n"""
-_SAMPLES = "SELECT location, key, n, member, round, ms FROM timing_samples"
+_MEMBERS = """SELECT target, run, utc, member, label, arm, cell, level, git_sha, diff_sha256, device
+              FROM timing_members WHERE status = 'ok' AND git_sha IS NOT NULL ORDER BY utc, target, run"""
+_SAMPLES = "SELECT target, run, member, round, ms FROM timing_samples"
 
 
 def verdicts(root: Path | str | None = None, *, reference: str, candidate: str | None = None, cell: str | None = None,
@@ -215,12 +215,12 @@ def verdicts(root: Path | str | None = None, *, reference: str, candidate: str |
     columns, rows = index.query(_MEMBERS, root=root)
     members = [dict(zip(columns, row, strict=True)) for row in rows]
     rounds: dict[tuple, dict[int, list[float]]] = {}
-    for location, key, n, member, rnd, ms in index.query(_SAMPLES, root=root)[1]:
-        rounds.setdefault((location, key, n, member), {}).setdefault(rnd, []).append(ms)
+    for target, run, member, rnd, ms in index.query(_SAMPLES, root=root)[1]:
+        rounds.setdefault((target, run, member), {}).setdefault(rnd, []).append(ms)
 
     stored: dict[tuple, list[dict]] = {}
     for m in members:
-        stored.setdefault((m["location"], m["key"], m["n"]), []).append(m)
+        stored.setdefault((m["target"], m["run"]), []).append(m)
     units: dict[tuple, list[tuple[dict, dict]]] = {}
     refused: dict[tuple, dict] = {}
     for sample, ms in stored.items():

@@ -31,6 +31,8 @@ from fsla_devtools.timing.declare import (
 )
 
 HERE = Path(__file__).resolve().parent
+#: the Bazel target the engine's session stands for, which keys its samples
+SUITE = "@fsla_bench//:suite"
 
 
 class Timing(unittest.TestCase):
@@ -193,23 +195,24 @@ class Timing(unittest.TestCase):
 
         g = Graph()
         src = g.node("inst", executor="fake_executors:echo", env=self.env("tip", self.committed("tip")))
-        kept = store(g, "store", source=src, location="fsla/inst", root=str(self.root / "records"))
+        kept = store(g, "store", source=src, label="@fsla//:inst", root=str(self.root / "records"))
         self.go([kept])
-        (record,) = Store("fsla/inst", self.root / "records").records()
-        self.assertEqual(list(record["samples"][-1]["provenance"]["checkouts"]), ["tip"])
+        (sample,) = Store("@fsla//:inst", self.root / "records").samples()
+        self.assertEqual(list(sample["provenance"]["checkouts"]), ["tip"])
 
     def test_a_stored_session_appends_a_run_stamped_sample_to_its_configurations_record(self):
         from fsla_devtools.results import Store
         from fsla_devtools.store import store
 
         g, session, _stop = self.graph([("tip/fast", "tip", "fixed", ["t8"], {"ms": 1.0})], cwd=self.committed("tip"))
-        kept = store(g, "store", source=session, location="timing/session", root=str(self.root / "records"))
+        kept = store(g, "store", source=session, label=SUITE, timing=True, root=str(self.root / "records"))
         stop = stop_timing_server(g, "stop-after-store", server=g.targets["timing-server"], after=[kept])
         first, second = self.go([stop]), self.go([stop])
-        (record,) = Store("timing/session", self.root / "records").records()
-        self.assertEqual([s["run"] for s in record["samples"]], [first["store"].output["run"], second["store"].output["run"]])
-        self.assertIn("tip/fast", record["samples"][0]["provenance"]["checkouts"])
-        self.assertEqual([m["status"] for m in record["samples"][0]["summary"]["members"]], ["ok"])
+        samples = Store(SUITE, self.root / "records").samples()
+        self.assertEqual([s["run"] for s in samples], [second["store"].output["run"], first["store"].output["run"]])
+        self.assertEqual(len({s["key"] for s in samples}), 1)
+        self.assertIn("tip/fast", samples[0]["provenance"]["checkouts"])
+        self.assertEqual([m["status"] for m in samples[0]["summary"]["members"]], ["ok"])
 
     def test_a_stored_timing_names_a_commit_or_is_refused(self):
         """A timing is comparable only to the code it ran: a session whose checkout has no commit is refused by the
@@ -220,7 +223,7 @@ class Timing(unittest.TestCase):
         bare.mkdir()
         subprocess.run(["git", "-C", str(bare), "init", "-q"], check=True)
         g, session, _stop = self.graph([("tip/fast", "tip", "fixed", ["t8"], {"ms": 1.0})], cwd=bare)
-        kept = store(g, "store", source=session, location="timing/session", root=str(self.root / "records"))
+        kept = store(g, "store", source=session, label=SUITE, timing=True, root=str(self.root / "records"))
         stop = stop_timing_server(g, "stop-after-store", server=g.targets["timing-server"], after=[kept])
         out = self.go([stop])
         self.assertEqual(out["store"].status, "failed")

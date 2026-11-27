@@ -6,12 +6,11 @@ from __future__ import annotations
 import json
 import sqlite3
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from fsla_devtools.results import Store, index, key
+from fsla_devtools.results import Store, index
 
 
 def isolate_cache(case: unittest.TestCase, directory: Path) -> None:
@@ -21,6 +20,11 @@ def isolate_cache(case: unittest.TestCase, directory: Path) -> None:
     case.addCleanup(patcher.stop)
 
 
+#: an instrument's store target and its output's semantics (`fsla_devtools.record`'s: source, file, inputs' digests)
+SASS_LABEL = "@fsla//measure:store_sass"
+SASS = {"source": "//:sass", "file": "sass.json", "inputs": {"//:library": "d" * 64}}
+
+
 class IndexContract(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -28,7 +32,11 @@ class IndexContract(unittest.TestCase):
         self.root = Path(self.tmp.name) / "records"
         self.views = Path(self.tmp.name) / "views"
         self.views.mkdir()
-        self.store = Store("tool", self.root)
+        self.store = Store("@fsla//:tool", self.root)
+        self.runs = iter(f"20261127T0000{i:02d}Z-test{i}" for i in range(60))
+
+    def put(self, semantics, store=None, **kwargs):
+        return (store or self.store).put(semantics, run=next(self.runs), **kwargs)
 
     def tearDown(self) -> None:
         self.tmp.cleanup()
@@ -37,46 +45,45 @@ class IndexContract(unittest.TestCase):
         return index.query(q, params, self.root, views=views)[1]
 
     def test_every_sample_is_a_row_with_its_json_fields_queryable(self) -> None:
-        self.store.put({"cell": "a"}, output={"ms": 1.5}, provenance={"git_sha": "x"})
-        self.store.put({"cell": "a"}, error="boom")
-        rows = self.sql("SELECT n, ok, json_extract(output, '$.ms'), json_extract(provenance, '$.git_sha'), error "
-                        "FROM samples ORDER BY n")
-        self.assertEqual(rows, [(0, 1, 1.5, "x", None), (1, 0, None, None, "boom")])
-        cond, params = index.matching("tool", {"cell": "a"})
-        self.assertEqual(len(self.sql(f"SELECT 1 FROM samples s JOIN records r USING (location, key) WHERE {cond}",
-                                      tuple(params))), 2)
+        self.put({"cell": "a"}, output={"ms": 1.5}, provenance={"git_sha": "x"})
+        self.put({"cell": "a"}, error="boom")
+        rows = self.sql("SELECT run, ok, json_extract(output, '$.ms'), json_extract(provenance, '$.git_sha'), error, "
+                        "json_extract(semantics, '$.cell') FROM samples ORDER BY run")
+        self.assertEqual(rows, [("20261127T000000Z-test0", 1, 1.5, "x", None, "a"),
+                                ("20261127T000001Z-test1", 0, None, None, "boom", "a")])
+        cond, params = index.matching("@fsla//:tool", {"cell": "a"})
+        self.assertEqual(len(self.sql(f"SELECT 1 FROM samples s WHERE {cond}", tuple(params))), 2)
 
-    def test_only_changed_records_are_read_and_vanished_ones_dropped(self) -> None:
-        self.store.put({"cell": "a"}, output=1)
-        self.store.put({"cell": "b"}, output=2)
+    def test_only_new_samples_are_read_and_vanished_ones_dropped(self) -> None:
+        self.put({"cell": "a"}, output=1)
+        gone = self.put({"cell": "b"}, output=2)
         self.assertEqual(index.build(self.root)["read"], 2)
         self.assertEqual(index.build(self.root)["read"], 0)
-        time.sleep(0.01)
-        self.store.put({"cell": "a"}, output=3)
+        self.put({"cell": "a"}, output=3)
         self.assertEqual(index.build(self.root)["read"], 1)
-        self.store.path(key({"cell": "b"})).unlink()
+        (self.store.dir / f"{gone['run']}.json").unlink()
         self.assertEqual(index.build(self.root)["dropped"], 1)
         self.assertEqual(self.sql("SELECT count(*) FROM samples"), [(2,)])
 
     def test_a_view_reading_another_view_is_created_whatever_its_name_and_a_view_that_left_is_dropped(self) -> None:
         (self.views / "a_outer.sql").write_text("CREATE VIEW a_outer AS SELECT count(*) AS c FROM z_inner;")
         (self.views / "z_inner.sql").write_text("CREATE VIEW z_inner AS SELECT * FROM samples WHERE ok;")
-        self.store.put({"cell": "a"}, output=1)
+        self.put({"cell": "a"}, output=1)
         self.assertEqual(self.sql("SELECT c FROM a_outer", views=self.views), [(1,)])
         (self.views / "a_outer.sql").unlink()
         with self.assertRaises(sqlite3.OperationalError):
             self.sql("SELECT c FROM a_outer", views=self.views)
 
     def test_a_named_database_is_written_where_it_is_named(self) -> None:
-        self.store.put({"cell": "a"}, output=1)
+        self.put({"cell": "a"}, output=1)
         db = Path(self.tmp.name) / "out" / "index.sqlite"
         self.assertEqual(index.build(self.root, db)["db"], str(db))
         self.assertEqual(sqlite3.connect(db).execute("SELECT count(*) FROM samples").fetchall(), [(1,)])
         self.assertFalse((Path(self.tmp.name) / "cache").exists())
 
-    def test_a_record_of_an_unknown_format_is_refused(self) -> None:
-        self.store.put({"cell": "a"}, output=1)
-        path = self.store.path(key({"cell": "a"}))
+    def test_a_sample_of_an_unknown_format_is_refused(self) -> None:
+        sample = self.put({"cell": "a"}, output=1)
+        path = self.store.dir / f"{sample['run']}.json"
         record = json.loads(path.read_text())
         record["format"] = 99
         path.write_text(json.dumps(record))
@@ -85,21 +92,18 @@ class IndexContract(unittest.TestCase):
 
     def test_a_where_path_is_names_only(self) -> None:
         with self.assertRaises(ValueError):
-            index.matching("tool", {"cell') OR 1=1 --": "x"})
+            index.matching("@fsla//:tool", {"cell') OR 1=1 --": "x"})
 
     def test_instrument_metrics_is_every_number_long_and_diff_cells_is_every_verdict(self) -> None:
         """The suite reads its own instruments through one long view: a SASS count is a row keyed by (instrument, cell,
-        metric), and an instrument that no longer exists has no branch; a stored diff is rows per cell and quantity
-        with its verdict and why, never its tensors."""
-        phases = self.root.parent / "phases.json"
-        phases.write_text(json.dumps({"cell-a": {"cell": "cell-a", "total": 3.0, "per_phase": {"fold": 1.0}}}))
-        Store("fsla/phases", self.root).put({"tool": "phases"}, output_file=phases, provenance={"run": "r1"})
+        metric), the instrument its store target's label; a stored diff is rows per cell and quantity with its verdict and
+        why, never its tensors."""
         sass = self.root.parent / "sass.json"
         sass.write_text(json.dumps({"": {"arm.cubin": {"ok": True, "functions": {"kern": {"hmma": 7, "instr": 90,
                                                                                             "calls": 0}}}}}))
-        Store("fsla/sass", self.root).put({"tool": "sass"}, output_file=sass, provenance={"run": "r1"})
-        Store("fsla/carry-vs-oracle", self.root).put(
-            {"diff": 1}, provenance={"run": "r1"},
+        self.put(SASS, Store(SASS_LABEL, self.root), output_file=sass, provenance={"run": "r1"})
+        self.put(
+            {"diff": 1}, Store("@fsla//measure:carry_vs_oracle", self.root), provenance={"run": "r1"},
             output={"strategy": "per-slot", "expect": "same", "held": False, "compared": 1, "quantities": 2,
                     "minimum": 2, "differing": [], "unusable": ["cell-b"], "refused": ["cell-c"],
                     "cells": {"cell-a": {"status": "ok", "same": True,
@@ -110,8 +114,9 @@ class IndexContract(unittest.TestCase):
                               "cell-b": {"status": "unusable", "produced_by": ["right"], "why": "no arm"},
                               "cell-c": {"status": "refused", "left": "RuntimeError: no arm", "right": None}}})
         rows = self.sql("SELECT instrument, cell, metric, value FROM instrument_metrics ORDER BY metric")
-        self.assertEqual(rows, [("sass", None, "sass.arm.cubin.kern.calls", 0), ("sass", None, "sass.arm.cubin.kern.hmma", 7),
-                                ("sass", None, "sass.arm.cubin.kern.instr", 90)])
+        self.assertEqual(rows, [(SASS_LABEL, None, "sass.arm.cubin.kern.calls", 0),
+                                (SASS_LABEL, None, "sass.arm.cubin.kern.hmma", 7),
+                                (SASS_LABEL, None, "sass.arm.cubin.kern.instr", 90)])
         verdicts = self.sql("SELECT cell, cell_status, why, quantity, same, quantity_why, ratio, bound_by, held "
                             "FROM diff_cells ORDER BY cell, quantity")
         self.assertEqual(verdicts, [("cell-a", "ok", None, "num", 1, None, None, None, 0),
@@ -125,7 +130,7 @@ class IndexContract(unittest.TestCase):
         for run, hmma in (("r1", 8), ("r2", 12)):
             f = self.root.parent / f"sass-{run}.json"
             f.write_text(json.dumps({"": {"arm.cubin": {"functions": {"kern": {"hmma": hmma, "instr": 90}}}}}))
-            Store("fsla/sass", self.root).put({"tool": "sass", "run": run}, output_file=f, provenance={"run": run})
+            self.put({**SASS, "run": run}, Store(SASS_LABEL, self.root), output_file=f, provenance={"run": run})
         rows = compare(self.root, baseline="r1", run="r2", min_change=0.1)
         self.assertEqual([(r["metric"], r["value"], r["reference"], round(r["change"], 3)) for r in rows],
                          [("sass.arm.cubin.kern.hmma", 12, 8, 0.5)])

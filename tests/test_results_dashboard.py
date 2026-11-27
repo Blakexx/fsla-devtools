@@ -27,8 +27,10 @@ class Dashboard(unittest.TestCase):
         rows = [{"owner": "tip/carry_forward", "cell": "dense", "status": "ok", "calls": 5,
                  "peak_allocated_bytes": 17_600_000, "peak_reserved_bytes": 52_400_000, "allocated_after_bytes": 1,
                  "allocated_before_build_bytes": 1, "outside_allocator_bytes": 2_100_000, "built": {"device": "gpu"}}]
-        Store("timing/memory", self.root).put({"executor": "memory"}, output={"run": "r", "rows": rows},
-                                              provenance={"run": "r", "checkouts": {"tip": {"git_sha": "a"}}}, run="r")
+        run = Store("@fsla//measure:session", self.root).samples()[0]["run"]
+        Store("@fsla//measure:memory", self.root).put({"executor": "memory"}, output={"run": run, "rows": rows},
+                                                      provenance={"run": run, "checkouts": {"tip": {"git_sha": "a"}}},
+                                                      run=run)
         page = render(self.root, reference="master")
         self.assertIn("<h2>session/G/carry_forward+flash</h2>", page)
         self.assertIn(">1.500<", page)
@@ -40,8 +42,8 @@ class Dashboard(unittest.TestCase):
     def test_a_member_that_failed_partway_shows_its_failure_and_no_median(self):
         """A member that kept samples from before it failed is not a measurement: its row is the failure (audit B10)."""
         plant(self.root, tip_ms=1.5)
-        record = json.loads(next((self.root / "timing" / "session").glob("*[0-9a-f].json")).read_text())
-        output = self.root / "timing" / "session" / record["samples"][0]["output"]
+        sessions = Store("@fsla//measure:session", self.root)
+        output = sessions.output(sessions.samples()[0])
         session = json.loads(output.read_text())
         tip = next(m for m in session["members"] if m["id"] == "m0")
         tip.update(status="failed", error="the call raised in round 5")

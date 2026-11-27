@@ -18,6 +18,8 @@ from fsla_devtools import instrument, record
 from fsla_devtools.results import Store, key
 
 STAMP = {"git_sha": "a" * 40, "branch": "main", "checkout": "tip", "diff_sha256": None}
+#: the store target's own label, which keys its samples
+LABEL = "@fsla//measure:store_manifest"
 #: a tool that reports where it ran and what it saw, or refuses or fails as its first argument says
 TOOL = """\
 import json, os, sys
@@ -94,7 +96,7 @@ class Record(Base):
         self.store_root = self.dir / "records"
 
     def described(self, outputs: list[dict], instrument_run: dict | None = None) -> str:
-        blob = {"source": "//:manifest", "location": "fsla/manifest", "inputs": {"//:library": "d" * 64},
+        blob = {"source": "//:manifest", "label": LABEL, "inputs": {"//:library": "d" * 64},
                 "outputs": outputs, "instrument": instrument_run, "stamp": STAMP}
         (self.runfiles / "_main" / "record.json").write_text(json.dumps(blob))
         return "_main/record.json"
@@ -108,24 +110,24 @@ class Record(Base):
         return printed.getvalue()
 
     def samples(self) -> list[dict]:
-        (only,) = Store("fsla/manifest", self.store_root).records()
-        return only["samples"]
+        return Store(LABEL, self.store_root).samples()
 
     def test_a_build_output_is_stored_once_keyed_by_what_it_depends_on(self) -> None:
         built = self.runfiles / "_main" / "out" / "m.json"
         built.write_text('{"kernels": 3}\n')
         path = self.described([{"name": "out/m.json", "path": "_main/out/m.json"}])
-        self.assertIn("stored: fsla/manifest out/m.json sample 0", self.main(path))
+        self.assertIn(f"stored: {LABEL} out/m.json sample ", self.main(path))
         self.assertIn("already stored", self.main(path))
         self.assertTrue(built.exists())
-        (only,) = Store("fsla/manifest", self.store_root).records()
-        self.assertEqual(only["semantics"],
+        (sample,) = self.samples()
+        self.assertEqual(sample["semantics"],
                          {"source": "//:manifest", "file": "out/m.json", "inputs": {"//:library": "d" * 64}})
-        self.assertEqual(only["key"], key(only["semantics"]))
-        (sample,) = only["samples"]
+        self.assertEqual(sample["key"], key(sample["semantics"]))
         self.assertEqual(sample["provenance"]["checkouts"], {"//:manifest": STAMP})
+        self.assertEqual(sample["provenance"]["run"], sample["run"])
         built.write_text('{"kernels": 4}\n')
-        self.assertIn("sample 1", self.main(path))
+        self.main(path)
+        self.assertEqual(len(self.samples()), 2)
 
     def test_an_instruments_refusal_is_a_failed_sample_naming_why(self) -> None:
         (self.runfiles / "_main" / "out" / "i.json").write_text(json.dumps({"refused": "no such kernel"}))
@@ -145,7 +147,7 @@ class Record(Base):
                               {"tool": "tool.py", "args": ["count"], "device": True, "files": files})
         self.assertIn("not stored: out/d.json", self.main(path, "--no-store"))
         self.assertTrue((self.dir / "scratch" / "out" / "d.json").is_file())
-        self.assertIn("stored: fsla/manifest out/d.json sample 0", self.main(path))
+        self.assertIn(f"stored: {LABEL} out/d.json sample ", self.main(path))
         self.assertFalse((self.dir / "scratch").exists())
         (sample,) = self.samples()
         self.assertTrue(sample["ok"])

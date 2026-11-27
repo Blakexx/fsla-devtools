@@ -1,7 +1,7 @@
 """STORING A TARGET'S RESULT through the store (`fsla_devtools.results`): a target of its own, run in the build system's
 environment.
 
-    store(g, "store-L1024", source=session, location="timing/session")
+    store(g, "store-L1024", source=session, label="@fsla_bench//:suite", timing=True)
 
 The record's semantics are the source target's (its `semantics.json`), so one measured configuration keeps one record
 and every run appends a sample, stamped with the run id; the sample's output is the source's file (`output["file"]`),
@@ -16,16 +16,18 @@ import shutil
 from pathlib import Path
 
 
-def store(g, name: str, *, source, location: str, root: str | None = None, cache: bool = False):
-    """`root` is the store's records directory; None is the machine's store (the dev config's `store.root`) -- a
-    SETTING, not a parameter, because the same record written to two checkouts of the data repository is the same record
-    and keying the path would make it two. `cache`: skip storing a result already stored (for an analysis the build
-    caches, whose key the store's key follows); a measurement stores every run."""
+def store(g, name: str, *, source, label: str, timing: bool = False, root: str | None = None, cache: bool = False):
+    """`label` is the Bazel target the build stands for (`@<workspace>//<package>:<target>`), which keys its samples;
+    `timing`: the result is a timing, stored only against the commits it ran. `root` is the store's records directory;
+    None is the machine's store (the dev config's `store.root`) -- a SETTING, not a parameter, because the same record
+    written to two checkouts of the data repository is the same record and keying the path would make it two. `cache`:
+    skip storing a result already stored (for an analysis the build caches, whose key the store's key follows); a
+    measurement stores every run."""
     #: WHERE THE SOURCE RAN is provenance, so it rides as a setting: a cached source cannot carry a `local` field, and
     #: its checkout is known at declaration -- its environment's directory -- without keying a path
     ran_in = None if source.env is None else {"label": source.env.label, "cwd": source.env.cwd}
     return g.node(name, executor="fsla_devtools.store:put", deps={"source": source},
-                  params={"location": location}, settings={"root": root, "source": ran_in}, cache=cache)
+                  params={"label": label, "timing": timing}, settings={"root": root, "source": ran_in}, cache=cache)
 
 
 def put(ctx) -> dict:
@@ -40,16 +42,18 @@ def put(ctx) -> dict:
     if not checkouts and ran_in:
         checkouts = {ran_in["label"]: checkout(ran_in["cwd"])}
     provenance = {"run": ctx.run, "checkouts": checkouts}
-    store = Store(ctx.params["location"], ctx.settings["root"])
+    store = Store(ctx.params["label"], ctx.settings["root"])
+    timing = ctx.params["timing"]
     if "file" in output:
         copy = ctx.workspace / output["file"]
         shutil.copyfile(Path(source.dir) / output["file"], copy)
         #: the rest of the target's output (each cell's or member's status, a gate's finding) rides on the sample
         summary = {k: v for k, v in output.items() if k != "file"}
-        sample = store.put(semantics, output_file=copy, provenance=provenance, run=ctx.run, summary=summary)
+        sample = store.put(semantics, output_file=copy, provenance=provenance, run=ctx.run, timing=timing,
+                           summary=summary)
     else:
-        sample = store.put(semantics, output=output, provenance=provenance, run=ctx.run)
-    return {"location": ctx.params["location"], "sample": sample["n"], "run": ctx.run}
+        sample = store.put(semantics, output=output, provenance=provenance, run=ctx.run, timing=timing)
+    return {"label": ctx.params["label"], "sample": sample["run"], "run": ctx.run}
 
 
 __all__ = ["put", "store"]

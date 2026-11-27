@@ -18,11 +18,11 @@ module from outside its bundle, is that member's failure; refuses two stopwatche
 first refusal; reads the clock and proves it on the lock; warms each member past `WARMUP_FLOOR` calls; then times
 rounds x reps, every rep in a fresh random order SEEDED FROM THE RUN'S ID (the seed is stored), each call preceded by the
 entry's untimed reset; reads the clock again. It writes `session.json` into its scratch directory and stores it as ONE
-sample at the manifest's location (`timing/session`): the semantics are what ran -- every entry's description, its
-bundle's content digest and environment, the cells, rounds, reps and warm-up, whether the clock was locked, and the
-machine's devices -- and the provenance is each bundle's stamped commit. Exit 0 is stored. A refusal, a clock off the lock,
-two stopwatches, a worker lost or nothing set up exits non-zero and stores nothing; samples already taken stay in the
-scratch directory, named.
+sample at the session's own label (the manifest's `label`, `@fsla//measure:session_entmax`): the semantics are what
+ran -- every entry's description, its bundle's content digest and environment, the cells, rounds, reps and warm-up,
+whether the clock was locked, and the machine's devices -- and the provenance is each bundle's stamped commit. Exit 0
+is stored. A refusal, a clock off the lock, two stopwatches, a worker lost or nothing set up exits non-zero and stores
+nothing; samples already taken stay in the scratch directory, named.
 
 The interleaving itself (`interleave`) is also the declared build system's session (`fsla_devtools.timing.executors`).
 """
@@ -36,7 +36,6 @@ import random
 import shutil
 import subprocess
 import sys
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,6 +43,7 @@ from pathlib import Path
 from ..config import machine
 from ..locks import clock, host
 from ..locks.gpu import gpu_lock
+from ..results.store import run_id
 from .pool import EntryWorker, Pool
 
 #: launches of each entry discarded before any is recorded: the first build schedules and warm caches
@@ -138,11 +138,6 @@ def check_shape(rounds: int, reps: int, warmup: int, what: str) -> None:
         raise ValueError(f"{what}: warmup at least {WARMUP_FLOOR}, odd reps and a round, got {warmup}, {reps}, {rounds}")
 
 
-def run_id() -> str:
-    """This run's identity: when it started and eight random hex digits."""
-    return time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + os.urandom(4).hex()
-
-
 def seed_of(run: str) -> int:
     """The order's seed, from the run's identity: two runs never walk the same order, and a run's is reproducible."""
     return int(hashlib.sha256(run.encode()).hexdigest()[:16], 16)
@@ -161,13 +156,13 @@ def devices() -> list[dict]:
             for line in done.stdout.splitlines() if line.strip()]
 
 
-def _store(location: str, root: str | None, semantics: dict, session_file: Path, provenance: dict, run: str,
+def _store(label: str, root: str | None, semantics: dict, session_file: Path, provenance: dict, run: str,
            summary: dict) -> dict:
-    """ONE sample of the session at `location`. The one import of the store's code."""
+    """ONE sample of the session at its own label, a timing (it names its commits). The one import of the store's code."""
     from fsla_devtools.results import Store
 
-    return Store(location, root).put(semantics, output_file=session_file, provenance=provenance, run=run,
-                                             summary=summary)
+    return Store(label, root).put(semantics, output_file=session_file, provenance=provenance, run=run, timing=True,
+                                  summary=summary)
 
 
 def _read(runfiles: Path, path: str) -> dict:
@@ -289,10 +284,10 @@ def main(argv: list[str]) -> int:
     if a.no_store:
         print(f"not stored: {scratch / 'session.json'}")
         return 0
-    sample = _store(manifest["location"], a.store_root, semantics, scratch / "session.json", provenance, run,
+    sample = _store(manifest["label"], a.store_root, semantics, scratch / "session.json", provenance, run,
                     {"members": statuses, "samples": len(session["samples"])})
     shutil.rmtree(scratch, ignore_errors=True)
-    print(f"stored: {manifest['location']} sample {sample['n']} (run {run})")
+    print(f"stored: {manifest['label']} sample {sample['run']}")
     return 0
 
 

@@ -2,7 +2,7 @@
 
     python -m fsla_devtools.results dashboard --out suite.html [--reference LABEL] [--run RUN] [--session S]
 
-A reading of the index (`timing_members`, `timing_samples`, `memory_rows`, the instrument locations), rebuilt each time it
+A reading of the index (`timing_members`, `timing_samples`, `memory_rows`, the instrument targets), rebuilt each time it
 is asked for and never stored. The run is the newest stored unless `--run` names one. For each of its sessions, every
 member's median and interquartile range over its samples, the LEVEL it prices (`kernel`, `op`, `layer`: a reading
 compares one level), its paired ratio to the reference label's member of the same arm on the same cell (the median of
@@ -20,15 +20,15 @@ from pathlib import Path
 from . import index
 
 _RUNS = "SELECT run, max(utc) FROM timing_members GROUP BY run ORDER BY max(utc) DESC"
-_MEMBERS = """SELECT location, key, n, utc, session, member, label, arm, cell, level, status, error, git_sha, device
+_MEMBERS = """SELECT target, run, key, utc, session, member, label, arm, cell, level, status, error, git_sha, device
               FROM timing_members WHERE run = ? ORDER BY session, cell, label"""
-_SAMPLES = "SELECT location, key, n, member, round, ms FROM timing_samples WHERE run = ?"
+_SAMPLES = "SELECT target, run, member, round, ms FROM timing_samples WHERE run = ?"
 _MEMORY = "SELECT label, arm, cell, peak_bytes, peak_reserved_total_bytes FROM memory_rows WHERE run = ? AND status = 'ok'"
-_INSTRUMENTS = """SELECT location, count(DISTINCT key), max(utc) FROM samples
-                  WHERE ok AND location LIKE 'fsla/%' GROUP BY location ORDER BY location"""
+_INSTRUMENTS = """SELECT label, count(DISTINCT key), max(utc) FROM samples
+                  WHERE ok AND json_type(semantics, '$.inputs') = 'object' GROUP BY label ORDER BY label"""
 _METRICS = "SELECT instrument, cell, metric, value FROM instrument_metrics WHERE run = ?"
-_DIFFS = """SELECT location, run, strategy, expect, held, compared, quantities, minimum, cell, cell_status, why, quantity,
-                   same, quantity_why, ratio, bound_by FROM diff_cells WHERE run = ? ORDER BY location, cell, quantity"""
+_DIFFS = """SELECT target, run, strategy, expect, held, compared, quantities, minimum, cell, cell_status, why, quantity,
+                   same, quantity_why, ratio, bound_by FROM diff_cells WHERE run = ? ORDER BY target, cell, quantity"""
 
 _STYLE = """
 :root { --ink:#1d2330; --muted:#5d6678; --rule:#d9dde5; --ground:#fbfbfc; --band:#eef1f6; --accent:#2f5d9a; }
@@ -76,32 +76,32 @@ def render(root: Path | str | None = None, *, reference: str | None = None, run:
     columns, rows = index.query(_MEMBERS, (run,), root=root)
     members = [dict(zip(columns, row, strict=True)) for row in rows if session is None or row[4] == session]
     rounds: dict[tuple, dict[int, list[float]]] = {}
-    for location, key, n, member, rnd, ms in index.query(_SAMPLES, (run,), root=root)[1]:
-        rounds.setdefault((location, key, n, member), {}).setdefault(rnd, []).append(ms)
+    for target, srun, member, rnd, ms in index.query(_SAMPLES, (run,), root=root)[1]:
+        rounds.setdefault((target, srun, member), {}).setdefault(rnd, []).append(ms)
     _, memory = index.query(_MEMORY, (run,), root=root)
     peaks = {(label, arm, cell): (peak, reserved) for label, arm, cell, peak, reserved in memory}
     _, instruments = index.query(_INSTRUMENTS, root=root)
     sessions: dict[tuple, list[dict]] = {}
     for m in members:
-        sessions.setdefault((m["session"], m["location"], m["key"], m["n"]), []).append(m)
+        sessions.setdefault((m["session"], m["target"], m["key"], m["run"]), []).append(m)
 
     out = ["<title>FSLA suite</title>", f"<style>{_STYLE}</style>", "<main>", "<h1>FSLA measurement suite</h1>",
            f"<p class='meta'>run <code>{html.escape(run or 'none')}</code> &middot; {len(sessions)} session(s); "
            f"ratios to <code>{html.escape(reference or 'no reference')}</code>. Latency is comparable only within one "
            "session.</p>"]
-    for (name, location, key, n), ms in sorted(sessions.items()):
+    for (name, target, key, srun), ms in sorted(sessions.items()):
         out.append(f"<h2>{html.escape(name or '')}</h2><p class='meta'>{html.escape(ms[0]['utc'])} &middot; "
                    f"{html.escape(ms[0]['device'] or '')} &middot; <code>{html.escape(key[:12])}</code></p>")
         out.append("<div class='scroll'><table><tr><th>label</th><th>arm</th><th>level</th><th>cell</th><th>median ms</th>"
                    "<th>IQR ms</th><th>ratio to reference</th><th>peak MB</th><th>reserved MB</th><th>commit</th></tr>")
         refs = {(m["arm"], m["cell"]): m for m in ms if m["label"] == reference and m["status"] == "ok"}
         for m in ms:
-            got = rounds.get((location, key, n, m["member"]), {})
+            got = rounds.get((target, srun, m["member"]), {})
             samples = [v for r in got.values() for v in r]
             base = refs.get((m["arm"], m["cell"]))
             measured = m["status"] == "ok" and samples
             ratio = None if base is None or base is m or not measured else \
-                _ratio(got, rounds.get((location, key, n, base["member"]), {}))
+                _ratio(got, rounds.get((target, srun, base["member"]), {}))
             allocated, reserved = peaks.get((m["label"], m["arm"], m["cell"]), (None, None))
             median = _ms(statistics.median(samples)) if measured else html.escape(m["status"] or "")
             spread = _ms(_iqr(samples)) if measured else html.escape((m["error"] or "")[:60])
@@ -115,7 +115,7 @@ def render(root: Path | str | None = None, *, reference: str | None = None, run:
         out.append("</table></div>")
     out += _instrument_sections(root, run, baseline)
     out += _diff_sections(root, run)
-    out.append("<h2>Instrument records</h2><div class='scroll'><table><tr><th>location</th><th>records</th>"
+    out.append("<h2>Instrument records</h2><div class='scroll'><table><tr><th>target</th><th>semantics</th>"
                "<th>newest sample</th></tr>")
     out += [f"<tr><td><code>{html.escape(loc)}</code></td><td class='num'>{count}</td><td>{html.escape(utc)}</td></tr>"
             for loc, count, utc in instruments]
@@ -175,11 +175,11 @@ def _diff_sections(root, run: str | None) -> list[str]:
     columns, rows = index.query(_DIFFS, (run,), root=root)
     verdicts = [dict(zip(columns, r, strict=True)) for r in rows]
     out = []
-    for location in sorted({v["location"] for v in verdicts}):
-        mine = [v for v in verdicts if v["location"] == location]
+    for target in sorted({v["target"] for v in verdicts}):
+        mine = [v for v in verdicts if v["target"] == target]
         head = mine[0]
         held = "HELD" if head["held"] else "DID NOT HOLD"
-        out.append(f"<h2>diff <code>{html.escape(location)}</code></h2><p class='meta'>{html.escape(head['strategy'])}, "
+        out.append(f"<h2>diff <code>{html.escape(target)}</code></h2><p class='meta'>{html.escape(head['strategy'])}, "
                    f"expect {html.escape(head['expect'])}: <b>{held}</b> &middot; {head['compared']} cell(s) compared, "
                    f"{head['quantities']} quantities (minimum {head['minimum']})</p>")
         shown = [v for v in mine if v["cell_status"] != "ok" or not v["same"]]

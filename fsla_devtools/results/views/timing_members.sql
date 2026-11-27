@@ -1,5 +1,5 @@
 -- Every member of every timing session a store target kept (fsla-devtools' `measure_timing`, stored at
--- `timing/session`): one row per (session sample, member). `owner` is the registration that made the member
+-- its session's label, `target`): one row per (session sample, member). `owner` is the registration that made the member
 -- (`tip/carry_forward`, `bench/flash`); `label` is its scope, the checkout or library a root named (`tip`), and `arm`
 -- its last segment (`carry_forward`, `entmax_solve`). `status` is `ok` or `failed` (an entry that
 -- could not run, with its `error`); `git_sha`, `diff_sha256` and `checkout` are the owner's checkout (the sample's
@@ -8,13 +8,13 @@
 -- library's layer, never a layer against a kernel. The session's samples are `timing_samples`; no ratio is
 -- stored, and which label is the reference is the reader's choice (`python -m fsla_devtools.results verdict --reference LABEL`).
 CREATE VIEW timing_members AS
-SELECT location, key, n, utc, run, session, instrument, rounds, reps, clock_before, clock_after, member, owner,
+SELECT target, key, utc, run, session, instrument, rounds, reps, clock_before, clock_after, member, owner,
        rtrim(prefix, '/') AS label, substr(owner, length(prefix) + 1) AS arm, cell, level, status, error, device, torch,
        json_extract(provenance, '$.checkouts."' || owner || '".git_sha') AS git_sha,
        json_extract(provenance, '$.checkouts."' || owner || '".diff_sha256') AS diff_sha256,
        json_extract(provenance, '$.checkouts."' || owner || '".checkout') AS checkout
-FROM (SELECT s.location, s.key, s.n, s.utc, s.provenance,
-             json_extract(s.provenance, '$.run') AS run,
+FROM (SELECT s.label AS target, s.key, s.utc, s.provenance,
+             s.run AS run,
              json_extract(s.output, '$.session') AS session,
              json_extract(s.output, '$.instrument') AS instrument,
              json_extract(s.output, '$.rounds') AS rounds,

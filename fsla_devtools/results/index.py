@@ -1,13 +1,12 @@
-"""THE INDEX: the records as one SQLite database, derived and never committed, for queries across every location.
+"""THE INDEX: the samples as one SQLite database, derived and never committed, for queries across every label.
 
-    records(location, key, format, semantics)
-    samples(location, key, n, ok, utc, wall_s, provenance, error, output_path, output, extra)
+    samples(label, run, key, ok, utc, wall_s, semantics, provenance, error, output_path, output, extra)
 
 `semantics`, `provenance`, `output` (a JSON output's text) and `extra` (whatever else a tool kept on the sample) are
-JSON, read with SQLite's JSON functions -- `json_extract(semantics, '$.cell')`, `json_each(output)` -- so the tables
-know no tool's shape. A tool's shape is a VIEW: each `views/*.sql` of this package is run after the tables are filled.
-The database is rebuilt incrementally: a record file whose size or modification time changed is read again, a vanished
-one dropped. It refuses a record of a format it does not know.
+JSON, read with SQLite's JSON functions -- `json_extract(semantics, '$.cell')`, `json_each(output)` -- so the table
+knows no tool's shape. A tool's shape is a VIEW: each `views/*.sql` of this package is run after the table is filled.
+The database is rebuilt incrementally: a sample file whose size or modification time changed is read again, a vanished
+one dropped. It refuses a sample of a format it does not know.
 
 WHERE IT LIVES: no checkout holds a derived file. A query's database is a CACHE of the machine, `results/<12 hex of the
 records directory's resolved path>/index.sqlite` under the dev config's `host.build_cache` (fsla_devtools.config), one
@@ -22,18 +21,18 @@ import json
 import sqlite3
 from pathlib import Path
 
-from .store import _RECORD, FORMAT, backend
+from .store import _RUN, FORMAT, backend
 
-_STANDARD = {"n", "ok", "utc", "wall_s", "provenance", "error", "output"}
+_STANDARD = {"format", "label", "run", "key", "semantics", "ok", "utc", "wall_s", "provenance", "error", "output"}
 #: THE VIEWS, this package's: a tool's shape over the tables
 VIEWS = Path(__file__).resolve().parent / "views"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, mtime_ns INTEGER, size INTEGER);
-CREATE TABLE IF NOT EXISTS records(location TEXT, key TEXT, format INTEGER, semantics TEXT, PRIMARY KEY (location, key));
-CREATE TABLE IF NOT EXISTS samples(location TEXT, key TEXT, n INTEGER, ok INTEGER, utc TEXT, wall_s REAL, provenance TEXT,
-                                   error TEXT, output_path TEXT, output TEXT, extra TEXT, PRIMARY KEY (location, key, n));
-CREATE INDEX IF NOT EXISTS samples_by_location ON samples(location, utc);
+CREATE TABLE IF NOT EXISTS samples(label TEXT, run TEXT, key TEXT, ok INTEGER, utc TEXT, wall_s REAL, semantics TEXT,
+                                   provenance TEXT, error TEXT, output_path TEXT, output TEXT, extra TEXT,
+                                   PRIMARY KEY (label, run));
+CREATE INDEX IF NOT EXISTS samples_by_label ON samples(label, utc);
 """
 
 
@@ -49,7 +48,7 @@ def default_db(root: Path) -> Path:
 
 
 def build(root: Path | str | None = None, db: Path | str | None = None, views: Path | str | None = None) -> dict:
-    """Bring the database up to date with the records; return what changed."""
+    """Bring the database up to date with the samples; return what changed."""
     root = backend(root)
     db = Path(db) if db else default_db(root)
     views = Path(views) if views else VIEWS
@@ -59,15 +58,15 @@ def build(root: Path | str | None = None, db: Path | str | None = None, views: P
     known = {path: (mtime, size) for path, mtime, size in con.execute("SELECT path, mtime_ns, size FROM files")}
     present = {}
     for path in root.rglob("*.json"):
-        if _RECORD.match(path.name):
+        if _RUN.match(path.stem):
             stat = path.stat()
             present[str(path.relative_to(root))] = (stat.st_mtime_ns, stat.st_size)
     changed = [p for p, st in present.items() if known.get(p) != st]
     gone = [p for p in known if p not in present]
     for rel in gone + changed:
-        location, key = str(Path(rel).parent), Path(rel).stem
-        con.execute("DELETE FROM records WHERE location = ? AND key = ?", (location, key))
-        con.execute("DELETE FROM samples WHERE location = ? AND key = ?", (location, key))
+        parts = Path(rel).parts
+        label = f"@{parts[0]}//{'/'.join(parts[1:-2])}:{parts[-2]}"
+        con.execute("DELETE FROM samples WHERE label = ? AND run = ?", (label, Path(rel).stem))
         con.execute("DELETE FROM files WHERE path = ?", (rel,))
     for rel in changed:
         _load(con, root, rel, present[rel])
@@ -88,23 +87,21 @@ def build(root: Path | str | None = None, db: Path | str | None = None, views: P
         pending = [v for v, _ in failed]
     con.commit()
     con.close()
-    return {"db": str(db), "read": len(changed), "dropped": len(gone), "records": len(present)}
+    return {"db": str(db), "read": len(changed), "dropped": len(gone), "samples": len(present)}
 
 
 def _load(con: sqlite3.Connection, root: Path, rel: str, stat: tuple[int, int]) -> None:
-    record = json.loads((root / rel).read_text())
-    if record.get("format") != FORMAT:
-        raise SystemExit(f"index: {rel} is format {record.get('format')!r}; this library reads {FORMAT}")
-    location, key = str(Path(rel).parent), record["key"]
-    con.execute("INSERT INTO records VALUES (?, ?, ?, ?)", (location, key, record["format"], json.dumps(record["semantics"])))
-    for s in record["samples"]:
-        output_path, output = s.get("output"), None
-        if output_path and output_path.endswith(".json"):
-            output = (root / location / output_path).read_text()
-        extra = {k: v for k, v in s.items() if k not in _STANDARD}
-        con.execute("INSERT INTO samples VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (location, key, s["n"], int(s["ok"]), s["utc"], s.get("wall_s"), json.dumps(s.get("provenance", {})),
-                     s.get("error"), output_path, output, json.dumps(extra) if extra else None))
+    s = json.loads((root / rel).read_text())
+    if s.get("format") != FORMAT:
+        raise SystemExit(f"index: {rel} is format {s.get('format')!r}; this library reads {FORMAT}")
+    output_path, output = s.get("output"), None
+    if output_path and output_path.endswith(".json"):
+        output = ((root / rel).parent / output_path).read_text()
+    extra = {k: v for k, v in s.items() if k not in _STANDARD}
+    con.execute("INSERT INTO samples VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (s["label"], s["run"], s["key"], int(s["ok"]), s["utc"], s.get("wall_s"), json.dumps(s["semantics"]),
+                 json.dumps(s.get("provenance", {})), s.get("error"), output_path, output,
+                 json.dumps(extra) if extra else None))
     con.execute("INSERT INTO files VALUES (?, ?, ?)", (rel, *stat))
 
 
@@ -121,13 +118,13 @@ def query(sql: str, params: tuple = (), root: Path | str | None = None, db: Path
     return columns, rows
 
 
-def matching(location: str, where: dict[str, str]) -> tuple[str, list]:
-    """The SQL condition for samples of `location` whose semantics hold each `path=value` (a dotted path into the
+def matching(label: str, where: dict[str, str]) -> tuple[str, list]:
+    """The SQL condition for samples of `label` whose semantics hold each `path=value` (a dotted path into the
     semantics; the value compared as text)."""
-    clauses, params = ["s.location = ?"], [location]
+    clauses, params = ["s.label = ?"], [label]
     for path, value in where.items():
         if not all(part.isidentifier() for part in path.split(".")):
             raise ValueError(f"--where {path!r} is not a dotted path of names")
-        clauses.append(f"CAST(json_extract(r.semantics, '$.{path}') AS TEXT) = ?")
+        clauses.append(f"CAST(json_extract(s.semantics, '$.{path}') AS TEXT) = ?")
         params.append(value)
     return " AND ".join(clauses), params

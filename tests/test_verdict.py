@@ -148,6 +148,10 @@ ROUNDS = 8
 REPS = 3
 
 
+#: each planted session's run: distinct, in the order planted
+RUNS = itertools.count()
+
+
 def plant(root: Path, *, tip_ms: float, master_ms: float = 1.0, tip_sha: str | None = "a", drift: float = 1.0,
           tip_owner: str = "tip/carry_forward", tip_level: str = "kernel", device: str = "gpu") -> None:
     """One stored session: tip and master timing `carry_forward` on `dense` with a host drift both share and a per-round
@@ -169,11 +173,12 @@ def plant(root: Path, *, tip_ms: float, master_ms: float = 1.0, tip_sha: str | N
     checkouts = {tip_owner: {"checkout": "tip", "git_sha": tip_sha, "diff_sha256": None},
                  "master/carry_forward": {"checkout": "master", "git_sha": "base", "diff_sha256": None},
                  "bench/flash": {"checkout": "fsla-bench", "git_sha": "bench", "diff_sha256": None}}
-    store = Store("timing/session", root)
+    store = Store("@fsla//measure:session", root)
     #: a member with no commit is one the store stored before it refused such a sample: written around the refusal
     with mock.patch.object(store_module, "_uncommitted", lambda _p: None) if tip_sha is None else nullcontext():
+        run = f"20260915T{next(RUNS):06d}Z-r"
         store.put({"executor": "measure", "cells": ["dense", "q"]}, output=output,
-                  provenance={"run": "r", "checkouts": checkouts}, run="r")
+                  provenance={"run": run, "checkouts": checkouts}, run=run, timing=True)
 
 
 class VerdictQuery(unittest.TestCase):
@@ -253,17 +258,19 @@ class VerdictQuery(unittest.TestCase):
     def test_a_null_gates_cells_are_rows(self):
         cells = {"dense": {"trusted": True, "ratio_median": 1.0, "ratio_q1": 0.99, "ratio_q3": 1.01},
                  "sparse": {"trusted": None, "error": "a copy could not run"}}
-        Store("timing/null", self.root).put({"executor": "null_gate"}, output={"members": [], "samples": [], "null": cells},
-                                            provenance={"run": "r", "checkouts": {"tip": {"git_sha": "a"}}}, run="r")
+        Store("@fsla//measure:null_gate", self.root).put(
+            {"executor": "null_gate"}, output={"members": [], "samples": [], "null": cells},
+            provenance={"run": "r", "checkouts": {"tip": {"git_sha": "a"}}}, run="20260915T000000Z-r")
         _, rows = index.query("SELECT cell, trusted, ratio_median, error FROM null_gates ORDER BY cell", root=self.root)
         self.assertEqual(rows, [("dense", 1, 1.0, None), ("sparse", None, None, "a copy could not run")])
 
     def test_an_instruments_cells_are_rows_with_their_status(self):
         summary = {"cells": {"dense": {"status": "ok", "exit": 0}, "deep": {"status": "failed", "exit": 1, "error": "no arm"}}}
-        Store("fsla/phases", self.root).put({"executor": "run_tool"}, output={"dense": {}}, provenance={"run": "r"},
-                                            run="r", summary=summary)
+        Store("@fsla//measure:phases", self.root).put({"executor": "run_tool"}, output={"dense": {}},
+                                                      provenance={"run": "r"}, run="20260915T000000Z-r", summary=summary)
         _, rows = index.query("SELECT instrument, cell, status, error FROM instrument_cells ORDER BY cell", root=self.root)
-        self.assertEqual(rows, [("phases", "deep", "failed", "no arm"), ("phases", "dense", "ok", None)])
+        self.assertEqual(rows, [("@fsla//measure:phases", "deep", "failed", "no arm"),
+                                ("@fsla//measure:phases", "dense", "ok", None)])
 
 
 if __name__ == "__main__":
