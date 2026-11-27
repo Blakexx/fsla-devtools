@@ -56,6 +56,23 @@ class StoreContract(unittest.TestCase):
         self.store.put({"binary": "b2"}, output=1)
         self.assertEqual(len(list(self.store.records())), 2)
 
+    def test_unless_stored_asks_the_record_whether_it_holds_the_outcome(self) -> None:
+        """A build output stored again stores nothing; a changed output, or a failure not yet held, is a new sample."""
+        sem = {"source": "//:manifest", "inputs": {"//:library": "a"}}
+        src = self.root / "m.json"
+        src.write_text('{"a": 1}\n')
+        self.assertEqual(self.store.put(sem, output_file=src, unless_stored=True)["n"], 0)
+        src.write_text('{"a": 1}\n')
+        self.assertIsNone(self.store.put(sem, output_file=src, unless_stored=True))
+        self.assertTrue(src.exists())
+        src.write_text('{"a": 2}\n')
+        self.assertEqual(self.store.put(sem, output_file=src, unless_stored=True)["n"], 1)
+        self.assertEqual(self.store.put(sem, error="refused: no device", unless_stored=True)["n"], 2)
+        self.assertIsNone(self.store.put(sem, error="refused: no device", unless_stored=True))
+        self.store.put(sem, output={"a": 3})
+        self.assertIsNone(self.store.put(sem, output={"a": 3}, unless_stored=True))
+        self.assertEqual(len(self.store.get(key(sem))["samples"]), 4)
+
     def test_an_output_file_is_moved_in_with_its_suffix(self) -> None:
         src = self.root / "capture.csv"
         src.write_text("a,b\n")

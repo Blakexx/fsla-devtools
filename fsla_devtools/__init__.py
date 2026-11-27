@@ -10,7 +10,11 @@
   system's targets interleaved clock-locked sessions, memory passes, null gates.
 - `fsla_devtools.results`: the results store's code -- records keyed by their semantics, every sample kept, in the data
   repository -- and its readings: the index and views, the verdict, the instruments' deltas, the dashboard.
-- `fsla_devtools.store`: the store target, a result written through `fsla_devtools.results`.
+- `fsla_devtools.instrument`: an instrument run -- a tool over the files it reads, laid out as a tree, its JSON or its
+  refusal the output.
+- `fsla_devtools.record`: the record of a build output, the program a `results_store` run target starts: each output
+  stored unless its record already holds it.
+- `fsla_devtools.store`: the declared build system's store target, a result written through `fsla_devtools.results`.
 - `fsla_devtools.process`: a command stopped whole, profiler and measured process included.
 - `fsla_devtools.config`: the dev config reader, and the machine sections (`host`, `clock`, `store`) every repository shares.
 - `fsla_devtools.locks`: the GPU lock, the host-compute budget and file locks, the clock lock.

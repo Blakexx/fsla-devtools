@@ -13,7 +13,9 @@ carry it. It is a development dependency: nothing a user installs imports it.
 | `fsla_devtools.timing` | the timing system: the session program a Bazel run target starts (`fsla_devtools.timing.session`: interleaved, clock-locked, stored) and its entry workers; and, as targets of the declared build system, a server of entry workers, registrations of timed callables on cells, sessions, memory passes, null gates |
 | `fsla_devtools.diff` | the diff targets: two executors run over the same cells in the environments they name, compared under one rule (bit-identity, the per-slot clause rule, support equality), with a claim the build can fail on -- a difference expected or refused |
 | `fsla_devtools.results` | the results store's code: records under a location, keyed by their semantics, every sample kept, in the data repository (fsla-results); its index and views, the verdict (whether a candidate's timing is a regression against a reference timed in the same sessions), the instruments' deltas and the dashboard |
-| `fsla_devtools.store` | the store target: a result written through `fsla_devtools.results` as a run-stamped sample of its source's record |
+| `fsla_devtools.instrument` | an instrument run: a tool over the files it reads, laid out as a tree of copies, its JSON (or its refusal) the output; what the `instrument` rule's action runs, and a store target's run for an instrument on the device |
+| `fsla_devtools.record` | the record of a build output: the program a `results_store` run target starts, storing each output file unless its record already holds it |
+| `fsla_devtools.store` | the store target of the declared build system: a result written through `fsla_devtools.results` as a run-stamped sample of its source's record |
 | `fsla_devtools.process` | `subprocess.run` for a command that starts processes of its own: a timeout or an interrupt stops the whole tree |
 | `fsla_devtools.config` | the dev config reader: one directory of JSON files a section, every key declared; the machine's `host`, `clock` and `store` sections every repository shares |
 | `fsla_devtools.locks` | the machine's locks: the GPU lock (exclusive or shared), the host-compute budget and named file locks, the SM clock lock (the machine's, counted by its holders) |
@@ -104,8 +106,8 @@ files from several checkouts:
 ```python
 def root(g, target):
     fsla = load(Path(target) / "declare.py")
-    tip = fsla["declare"](g.scoped("tip"), fsla["checkout"](target, python=..., label="tip"), cells=["flagship-dense"])
-    return {"all": g.group("all", [tip["binary"], *tip["instruments"].values()])}
+    tip = fsla["declare"](g.scoped("tip"), fsla["checkout"](target, python=..., label="tip"), timing=start_timing_server(g))
+    return {"all": g.group("all", [tip["binary"], *tip["diffs"].values()])}
 ```
 
 A target's KEY is sha256 over its executor, parameters, declared code digest, and each dependency's key and output
@@ -169,6 +171,38 @@ times one registration's entries against copies of themselves in second workers,
 `fsla_devtools.store.store` writes a target's result through the store (`fsla_devtools.results`) as a run-stamped sample
 of the record its source's semantics key.
 
+## <a id="instruments"></a>The instruments and the records of build outputs
+
+**AN INSTRUMENT** (`instrument`, `bazel/measure.bzl`) is a tool's JSON over the files it reads: `tool` (a `.py` run on
+the environment's interpreter as `TOOL ARGS... --json OUT`), `arguments` (`$(rootpath ...)` expanded), `data`.
+`fsla_devtools.instrument` copies every file to its path in a fresh tree, links followed, so a tool that resolves its
+own path finds the tree and never the checkout the files link into, and runs the tool there with the tree as its import
+path. A tool that cannot run on what it was handed writes `{"refused": WHY}` and exits 0: the refusal is its output and
+stops nothing else. A tool that fails, or exits 0 without its JSON, fails. Without a device an instrument is an action
+(outside the sandbox, since the environment's interpreter reads the store), its JSON a build output; it sees no device
+and no machine's home. ON THE DEVICE (`devices`, the devices' identity, which keys its record) it is never an action: a
+build holds the host budget, and the GPU taken under it deadlocks against a measurement, which takes the GPU first, so
+it runs in the run phase of the store target that records it, in the run's environment, taking the machine's locks
+itself.
+
+**A BUILD OUTPUT'S RECORD** (`results_store`): `src` (any target's files, or an instrument), the store's `location`, and
+`inputs` (what the output depends on beyond an instrument's own). The build writes `<name>.record.json`: the source's
+label, each output file, the CONTENT DIGEST of every input (each of its files by its path and its bytes' digest) and the
+workspace's stamp, refusing a workspace that stamps no commit. `bazel run` starts `fsla_devtools.record`, which stores
+each file as one record -- its SEMANTICS the source, the file's name, the inputs' digests and an instrument's
+arguments; its PROVENANCE the run and the stamped commit -- and ASKS THE STORE first (`Store.put(..., unless_stored=True)`):
+when the record already holds this outcome nothing is stored, so a second run over the same build stores nothing into
+whichever store it is pointed at. An instrument's refusal is a failed sample, `refused: WHY`. A record names another
+repository by its own name (`@warpline`, `@host_gpu`), never the canonical name Bazel derives, which moves with Bazel's
+release and the module graph.
+
+```bash
+bazel run //measure:store_static_manifest                  # record each static manifest, or nothing if held
+bazel run //measure:store_oracle_tier                      # run the oracle tier on the device, then record it
+bazel run //measure:store_oracle_tier -- --no-store        # run it, keep its JSON in the scratch, store nothing
+bazel run //measure:store_static_manifest -- --store-root DIR
+```
+
 ## The diff
 
 "The same function in two checkouts" and "the kernel against its fp64 reference" are the same question asked twice, so
@@ -208,6 +242,7 @@ store = Store("mqar/local")                        # the tool's own location, un
 semantics = {"bench": "mqar", "config": "local", "cell": "d1-n256", "local": checkouts}
 store.put(semantics, output=rows, wall_s=12.3, provenance=checkout(worktree))
 store.put(semantics, error="RuntimeError: ...")    # a failure is a sample too
+store.put(semantics, output_file=path, unless_stored=True)   # None, storing nothing, when the record holds the outcome
 record = store.get(key(semantics))                  # Store.complete(record), store.output(record)
 ```
 
@@ -244,7 +279,7 @@ repository's own index is a build output (`results_index`, `bazel/results.bzl`),
 | `timing_members` | `timing/session` (`measure_timing`, through a store target) | member of a stored session: the run, the session, its registration (`owner`), the label and arm read from it, the cell, the LEVEL it prices (`kernel`, `op`, `layer`), whether it ran and why not, device, torch, the owner's commit and diff, the session's rounds, reps and clock reads |
 | `timing_samples` | `timing_members` | timed call, in the order taken: its member's label, arm and cell, its round, rep and position in the rep's random order, and its milliseconds |
 | `memory_rows` | `timing/memory` (`measure_memory`) | timing entry alone on a central cell: peak allocated and reserved bytes, what was allocated before the build and after the calls, bytes held outside the caching allocator and the totals with them, label, arm, commit |
-| `instrument_cells` | `fsla/<instrument>` (a fsla checkout's instrument targets) | cell of an instrument run: the run, whether the tool ran on it, and its exit and error when it could not |
+| `instrument_cells` | `fsla/<instrument>` (the declared build system's per-cell instrument targets) | cell of an instrument run: the run, whether the tool ran on it, and its exit and error when it could not |
 | `instrument_metrics` | `fsla/<instrument>` | every NUMBER a declared instrument recorded, one row each, in long form: the run, the cell (NULL for the whole-binary `sass`), a dotted `metric` (`sass.<cubin>.<function>.<count>`) and its value |
 | `diff_cells` | `fsla/<name>` and `diff/<surface>` (the diff targets) | cell and quantity of a stored diff: the claim and whether it `held`, the cell's status (`ok`, `unusable`, `refused`) and why, and the quantity's verdict with why it differs and its worst slot |
 | `null_gates` | `timing/null` (`measure_null_gate`) | cell of a null gate: the run, whether the entry's two workers agree, the ratio's median and quartiles |
@@ -398,7 +433,8 @@ index as a build output (`results_index`), a data repository's.
 
 **The measurement rules** (`bazel/measure.bzl`): a cell's description (`cell`), a timing entry with its bundle
 (`timing_entry`) and an interleaved session over entries that `bazel run` measures and stores (`interleaved_timing`),
-[above](#timing).
+[above](#timing); an instrument (`instrument`) and a build output's record that `bazel run` stores (`results_store`),
+[above](#instruments).
 
 ## <a id="the-machines-disk"></a>The machine's disk
 

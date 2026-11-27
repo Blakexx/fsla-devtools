@@ -1,6 +1,7 @@
--- Every cell of every stored instrument run (a fsla checkout's `run_tool` targets, stored at `fsla/<instrument>`): one
--- row per (sample, cell) from the sample's summary, whether the instrument ran on the cell (`ok`) or could not (`failed`,
--- with the tool's exit and error). The cells that ran hold their results in the sample's output file.
+-- Every cell of every stored per-cell instrument run (the declared build system's instrument targets, stored at
+-- `fsla/<instrument>` with each cell's status in the sample's summary): one row per (sample, cell), whether the instrument
+-- ran on the cell (`ok`) or could not (`failed`, with the tool's exit and error). The cells that ran hold their results
+-- in the sample's output file.
 CREATE VIEW instrument_cells AS
 SELECT s.location, s.key, s.n, s.utc,
        json_extract(s.extra, '$.run') AS run,

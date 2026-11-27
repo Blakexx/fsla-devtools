@@ -1,10 +1,23 @@
 """THE MEASUREMENT RULES, every FSLA repository's: a cell's description (`cell`, which the environment extension's `cells`
-tag declares one of a central cell), a timed callable on cells with the bundle of code it runs in (`timing_entry`), and an
-interleaved session over entries that `bazel run` starts and stores (`interleaved_timing`). Docs: README.md#timing.
+tag declares one of a central cell), a timed callable on cells with the bundle of code it runs in (`timing_entry`), an
+interleaved session over entries that `bazel run` starts and stores (`interleaved_timing`), a tool's JSON over the files
+it reads (`instrument`), and the record of a build output that `bazel run` stores (`results_store`). Docs:
+README.md#timing, README.md#instruments.
 
     timing_entry(name = "entmax_solve_<cell>", executor = "measure.executors:timed", params = {"arm": ...},
                  cells = ["@fsla_cells//:<cell>"], data = [...], binds = ["fsla_cu13._C"], venv = VENV, python = ...)
     interleaved_timing(name = "session_entmax", entries = [":entmax_solve_<cell>"], clock = ":clock")
+    instrument(name = "oracle_tier", tool = "oracle_tier.py", data = [...], devices = "@host_gpu//:identity.txt", venv = VENV)
+    results_store(name = "store_oracle_tier", src = ":oracle_tier", location = "fsla/oracle-tier", venv = VENV, python = ...)
+    results_store(name = "store_static_manifest", src = "//:static_manifest", inputs = ["//:library", ...], ...)
+
+An instrument is a tool run over the files it reads, laid out as a tree (`fsla_devtools.instrument`): its JSON, or
+`{"refused": WHY}` when it cannot run, which stops nothing else. Without a device it is an action, its JSON a build
+output; on the device it runs in the run phase of the store target that records it, since a build holds the host budget
+and the GPU taken under it deadlocks against a measurement, which takes the GPU first. A store target's record keys each
+output file by its source, its name and the content digest of every input it depends on, stamps the workspace's commit
+into its provenance, and its program (`fsla_devtools.record`) asks the store whether the record already holds the outcome
+before it writes anything.
 
 Everything a session needs is a build output: each cell's description (its record and the digest of the code that draws
 it, never its tensors), each entry's description (written here, nothing imported) and BUNDLE -- its runfiles (the code it
@@ -37,40 +50,56 @@ TimingEntryInfo = provider(
     },
 )
 
-#: THE BUNDLE MANIFEST'S ACTION, run on the environment's base interpreter (standard library only): the workspace's STAMP
-#: -- the commit, branch, checkout name and the digest of its uncommitted tracked diff, which its status command writes as
-#: the `STABLE_` keys below (`--workspace_status_command`; Bazel fails the build when it fails) -- the bundle's CONTENT
-#: DIGEST (sha256 over every file, by its path in the bundle and its bytes' digest) and its ENVIRONMENT (the store venv's
-#: key, its path's last part). A workspace that stamps no commit is refused: a number names the code it measured.
-_BUNDLE = """\
+#: THE WORKSPACE'S STAMP AND A CONTENT DIGEST, the start of each action below that writes one (run on the environment's
+#: base interpreter, standard library only): the STAMP is the commit, branch, checkout name and the digest of its
+#: uncommitted tracked diff, which the status command writes as the `STABLE_` keys below (`--workspace_status_command`;
+#: Bazel fails the build when it fails), and a workspace that stamps no commit is refused: a number names the code it
+#: measured. A CONTENT DIGEST is sha256 over files, each by its name and its bytes' digest.
+_STAMP = """\
 import argparse, hashlib, json, pathlib
 KEYS = {"STABLE_GIT_COMMIT": "git_sha", "STABLE_GIT_BRANCH": "branch", "STABLE_GIT_DIFF_SHA256": "diff_sha256",
         "STABLE_CHECKOUT": "checkout"}
+def stamp(status):
+    keys = dict((line + " ").split(" ", 1) for line in status.read_text().splitlines() if line)
+    keys = {k: v.strip() for k, v in keys.items()}
+    missing = sorted(set(KEYS) - set(keys))
+    if missing or not keys["STABLE_GIT_COMMIT"]:
+        raise SystemExit("the workspace stamps no commit (%s): its .bazelrc names no --workspace_status_command writing %s"
+                         % (missing or "STABLE_GIT_COMMIT is empty", sorted(KEYS)))
+    return {field: keys[key] or None for key, field in KEYS.items()}
+def digest(files):
+    h = hashlib.sha256()
+    for name, path in sorted(files):
+        h.update(name.encode() + b"\\0" + hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest().encode() + b"\\0")
+    return h.hexdigest()
+"""
+
+#: THE BUNDLE MANIFEST'S ACTION: the workspace's stamp, the bundle's CONTENT DIGEST (every file by its path in the bundle)
+#: and its ENVIRONMENT (the store venv's key, its path's last part)
+_BUNDLE = _STAMP + """\
 ap = argparse.ArgumentParser(fromfile_prefix_chars="@")
 ap.add_argument("--status", type=pathlib.Path)
 ap.add_argument("--venv")
 ap.add_argument("--out", type=pathlib.Path)
 ap.add_argument("--file", nargs=2, action="append", default=[])
 a = ap.parse_args()
-keys = dict((line + " ").split(" ", 1) for line in a.status.read_text().splitlines() if line)
-keys = {k: v.strip() for k, v in keys.items()}
-missing = sorted(set(KEYS) - set(keys))
-if missing or not keys["STABLE_GIT_COMMIT"]:
-    raise SystemExit("the workspace stamps no commit (%s): its .bazelrc names no --workspace_status_command writing %s"
-                     % (missing or "STABLE_GIT_COMMIT is empty", sorted(KEYS)))
-h = hashlib.sha256()
-for name, path in sorted(a.file):
-    h.update(name.encode() + b"\\0" + hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest().encode() + b"\\0")
-a.out.write_text(json.dumps({"stamp": {field: keys[key] or None for key, field in KEYS.items()}, "digest": h.hexdigest(),
-                             "files": len(a.file), "environment": pathlib.PurePath(a.venv).name}, indent=1, sort_keys=True) + "\\n")
+a.out.write_text(json.dumps({"stamp": stamp(a.status), "digest": digest(a.file), "files": len(a.file),
+                             "environment": pathlib.PurePath(a.venv).name}, indent=1, sort_keys=True) + "\\n")
 """
 
 def _rlocation(ctx, f):
     """A file's path in a run target's runfiles."""
     return f.short_path[3:] if f.short_path.startswith("../") else ctx.workspace_name + "/" + f.short_path
 
+def _repository(canonical):
+    """A repository by its own name, never the canonical name Bazel derives for it (`warpline+`,
+    `fsla_devtools++environment+host_gpu`), which moves with Bazel's release and the module graph."""
+    return canonical.replace("~", "+").rstrip("+").split("+")[-1]
+
 def _owner(label):
-    return ("@%s" % label.workspace_name if label.workspace_name else "") + "//%s:%s" % (label.package, label.name)
+    """A label as a record names it, its repository by `_repository`."""
+    repo = _repository(label.workspace_name)
+    return ("@%s" % repo if repo else "") + "//%s:%s" % (label.package, label.name)
 
 def _cell_impl(ctx):
     return [DefaultInfo(files = depset([ctx.file.src])), CellInfo(name = ctx.label.name, description = ctx.file.src)]
@@ -211,4 +240,188 @@ interleaved_timing = rule(
     },
     doc = "An interleaved timing session over entries: `bazel run` measures and stores it (`-- --no-store`, " +
           "`--scratch DIR`, `--store-root DIR`).",
+)
+
+InstrumentInfo = provider(
+    doc = "An instrument: the tool, its arguments and the files it reads, and its output where a build makes it.",
+    fields = {
+        "tool": "the tool's path in the instrument's tree",
+        "args": "its arguments, before `--json OUT`",
+        "files": "every file it reads, laid out in its tree",
+        "inputs": "what its output depends on: (label, its files) for the tool, each of `data` and the devices' identity",
+        "output": "the JSON a build makes; None for an instrument on the device, which its store target runs",
+        "name": "the output's name",
+    },
+)
+
+def _tree_path(f):
+    """A file's path in an instrument's tree and in a record: the main repository's at its path, another repository's
+    under `external/<its own name>/` (`_repository`)."""
+    if not f.short_path.startswith("../"):
+        return f.short_path
+    repo, _, path = f.short_path[3:].partition("/")
+    return "external/%s/%s" % (_repository(repo), path)
+
+def _tree_entry(f):
+    return [_tree_path(f), f.path]
+
+def _instrument_impl(ctx):
+    targets = [ctx.attr.tool] + ctx.attr.data
+    args = [ctx.expand_location(a, targets) for a in ctx.attr.arguments]
+    files = depset([ctx.file.tool] + ctx.files.data)
+    inputs = [(_owner(t.label), t.files) for t in targets]
+    if ctx.attr.devices:
+        inputs.append((_owner(ctx.attr.devices.label), ctx.attr.devices.files))
+    name = ctx.label.name + ".json"
+    if ctx.attr.devices:
+        #: named as the action's output would be, by its path in the tree
+        repo = _repository(ctx.label.workspace_name)
+        where = (["external", repo] if repo else []) + [ctx.label.package, name]
+        return [DefaultInfo(), InstrumentInfo(tool = _tree_path(ctx.file.tool), args = args, files = files, inputs = inputs,
+                                              output = None, name = "/".join([w for w in where if w]))]
+
+    #: an instrument without a device is an action: its tree laid out, the tool run in it, its JSON the output
+    listing = ctx.actions.args()
+    listing.set_param_file_format("multiline")
+    listing.add_all(files, map_each = _tree_entry)
+    files_list = ctx.actions.declare_file(ctx.label.name + ".files")
+    ctx.actions.write(files_list, listing)
+    output = ctx.actions.declare_file(name)
+    run = ctx.actions.args()
+    run.add_all(["-I", "-m", "fsla_devtools.instrument", "--files", files_list, "--tool", _tree_path(ctx.file.tool)])
+    run.add("--out", output)
+    run.add("--")
+    run.add_all(args)
+    ctx.actions.run(
+        executable = ctx.attr.venv + "/bin/python3",
+        arguments = [run],
+        inputs = depset([files_list], transitive = [files]),
+        outputs = [output],
+        mnemonic = "Instrument",
+        progress_message = "Running %{label}'s tool",
+        #: the environment's interpreter reads its packages from the store, which the sandbox does not hold; its store
+        #: path on the command line keys the action by the environment
+        execution_requirements = {"no-sandbox": "1"},
+    )
+    return [DefaultInfo(files = depset([output])), InstrumentInfo(tool = _tree_path(ctx.file.tool), args = args,
+                                                                  files = files, inputs = inputs, output = output,
+                                                                  name = _tree_path(output))]
+
+instrument = rule(
+    implementation = _instrument_impl,
+    attrs = {
+        "tool": attr.label(mandatory = True, allow_single_file = [".py"], doc = "the tool, run as `TOOL ARGS... --json " +
+                                                                               "OUT` on the environment's interpreter"),
+        "arguments": attr.string_list(doc = "its arguments, `$(rootpath ...)` of `tool` and `data` expanded to the tree's " +
+                                            "paths"),
+        "data": attr.label_list(allow_files = True, doc = "the files it reads, laid out at their paths in its tree"),
+        "devices": attr.label(allow_single_file = True, doc = "an instrument on the device: the devices' identity, an " +
+                                                              "input of its record; its store target runs it"),
+        "venv": attr.string(mandatory = True, doc = "the environment's store venv, whose interpreter runs the tool"),
+    },
+    doc = "A tool's JSON over the files it reads: a build output, or, on the device, what its store target runs. A tool " +
+          "that cannot run writes `{\"refused\": WHY}` and exits 0; one that fails fails.",
+)
+
+#: THE RECORD'S ACTION: the skeleton Starlark wrote (the source, the location, each output file, an instrument's run),
+#: with the workspace's stamp and each input's CONTENT DIGEST (every file of it by its path in the tree)
+_RECORD = _STAMP + """\
+ap = argparse.ArgumentParser(fromfile_prefix_chars="@")
+ap.add_argument("--skeleton", type=pathlib.Path)
+ap.add_argument("--status", type=pathlib.Path)
+ap.add_argument("--out", type=pathlib.Path)
+ap.add_argument("--inputs", type=pathlib.Path)
+a = ap.parse_args()
+inputs, label = {}, None
+lines = iter(a.inputs.read_text().splitlines())
+for line in lines:
+    if line == "--label":
+        label = next(lines)
+        inputs[label] = []
+    else:
+        inputs[label].append((line, next(lines)))
+record = json.loads(a.skeleton.read_text())
+record.update(stamp=stamp(a.status), inputs={label: digest(files) for label, files in inputs.items()})
+a.out.write_text(json.dumps(record, indent=1, sort_keys=True) + "\\n")
+"""
+
+_RECORD_RUN = """\
+#!/bin/bash
+# a build output's record (fsla_devtools' results_store): fsla_devtools.record on the environment's interpreter, which
+# stores each output file unless its record already holds it (an instrument on the device runs first)
+set -euo pipefail
+runfiles="${{RUNFILES_DIR:-$(realpath -s "$0").runfiles}}"
+exec {python} -I -m fsla_devtools.record --runfiles "$runfiles" --record {record} "$@"
+"""
+
+def _results_store_impl(ctx):
+    src = ctx.attr.src
+    instrument = src[InstrumentInfo] if InstrumentInfo in src else None
+    if instrument == None and not ctx.attr.inputs:
+        fail("%s: %s is no instrument, so `inputs` names what its output depends on" % (ctx.label, src.label))
+    inputs = [(_owner(t.label), t.files) for t in ctx.attr.inputs] + (instrument.inputs if instrument else [])
+    device = instrument != None and instrument.output == None
+    if device:
+        outputs = [{"name": instrument.name, "path": None}]
+        carried = instrument.files
+    else:
+        found = src[DefaultInfo].files.to_list()
+        if not found:
+            fail("%s: %s builds no file" % (ctx.label, src.label))
+        outputs = [{"name": _tree_path(f), "path": _rlocation(ctx, f)} for f in found]
+        carried = depset(found)
+    skeleton = ctx.actions.declare_file(ctx.label.name + ".skeleton.json")
+    ctx.actions.write(skeleton, json.encode_indent({
+        "source": _owner(src.label),
+        "location": ctx.attr.location,
+        "outputs": outputs,
+        "instrument": None if instrument == None else {
+            "tool": instrument.tool,
+            "args": instrument.args,
+            "device": device,
+            "files": [[_tree_path(f), _rlocation(ctx, f)] for f in instrument.files.to_list()] if device else [],
+        },
+    }) + "\n")
+    listing = ctx.actions.args()
+    listing.set_param_file_format("multiline")
+    for label, files in inputs:
+        listing.add("--label", label)
+        listing.add_all(files, map_each = _tree_entry)
+    inputs_list = ctx.actions.declare_file(ctx.label.name + ".inputs")
+    ctx.actions.write(inputs_list, listing)
+    record = ctx.actions.declare_file(ctx.label.name + ".record.json")
+    args = ctx.actions.args()
+    args.add_all(["-I", "-c", _RECORD])
+    args.add("--skeleton", skeleton)
+    args.add("--status", ctx.info_file)
+    args.add("--inputs", inputs_list)
+    args.add("--out", record)
+    ctx.actions.run(
+        executable = ctx.file.python,
+        arguments = [args],
+        inputs = depset([skeleton, inputs_list, ctx.info_file], transitive = [files for _label, files in inputs]),
+        outputs = [record],
+        mnemonic = "ResultsRecord",
+        progress_message = "Stamping and digesting %{label}'s record",
+    )
+    launcher = ctx.actions.declare_file(ctx.label.name + ".sh")
+    ctx.actions.write(launcher, _RECORD_RUN.format(python = shell.quote(ctx.attr.venv + "/bin/python3"),
+                                                   record = shell.quote(_rlocation(ctx, record))), is_executable = True)
+    return [DefaultInfo(executable = launcher, files = depset([record]),
+                        runfiles = ctx.runfiles(files = [record], transitive_files = carried))]
+
+results_store = rule(
+    implementation = _results_store_impl,
+    executable = True,
+    attrs = {
+        "src": attr.label(mandatory = True, doc = "the build output stored: each of its files a record; an instrument"),
+        "location": attr.string(mandatory = True, doc = "the store's location the records are kept at"),
+        "inputs": attr.label_list(allow_files = True, doc = "what the output depends on, beyond an instrument's own: " +
+                                                            "their files' digests key the record"),
+        "venv": attr.string(mandatory = True, doc = "the environment's store venv, whose interpreter runs the store"),
+        "python": attr.label(mandatory = True, allow_single_file = True, cfg = "exec", doc = "the environment's base " +
+                                                                                             "interpreter, for the record"),
+    },
+    doc = "The record of a build output: `bazel run` stores each of its files unless the store already holds it " +
+          "(`-- --store-root DIR`, `--no-store`, `--scratch DIR`).",
 )

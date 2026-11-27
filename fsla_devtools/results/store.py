@@ -162,12 +162,15 @@ class Store:
                 yield json.loads(path.read_text())
 
     def put(self, semantics: dict, *, output: object = None, output_file: Path | str | None = None,
-            error: str | None = None, wall_s: float | None = None, provenance: dict | None = None, **extra) -> dict:
+            error: str | None = None, wall_s: float | None = None, provenance: dict | None = None,
+            unless_stored: bool = False, **extra) -> dict | None:
         """Add one sample under the semantics' key and return it. A success hands either `output` (stored as JSON) or
         `output_file` (moved in, its suffix kept); a failure hands `error`. `provenance` is what the tool knows of where
         the sample came from (its checkouts, a stage); the host is added. `extra` is kept on the sample as given. A sample
         at a timing location (`timing/...`) names the commit of every checkout it ran (`provenance["checkouts"]`, each
-        a `checkout()`), or it is refused."""
+        a `checkout()`), or it is refused. `unless_stored`: when the record already holds this outcome -- a successful
+        sample whose output has these bytes, or a failed one with this error -- nothing is stored and None is returned
+        (a build output stored again; a measurement stores every run)."""
         if (error is None) == (output is None and output_file is None) or (output is not None and output_file is not None):
             raise ValueError("a sample is exactly one of output, output_file or error")
         if _timing(self.location):
@@ -190,6 +193,8 @@ class Store:
                 raise RuntimeError(f"{self.location}/{k} is format {record.get('format')}, this library writes {FORMAT}")
             if record["semantics"] != semantics:
                 raise RuntimeError(f"{self.location}/{k}: stored semantics differ from the ones given (a key collision)")
+            if unless_stored and self._holds(record, output, output_file, error):
+                return None
             n = len(record["samples"])
             sample = {"n": n, "ok": error is None, "utc": utc(), "wall_s": None if wall_s is None else round(wall_s, 3),
                       "provenance": {"host": platform.node(), **(provenance or {})}, **extra}
@@ -208,6 +213,15 @@ class Store:
             tmp.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
             tmp.replace(self.path(k))
         return sample
+
+    def _holds(self, record: dict, output: object, output_file: Path | str | None, error: str | None) -> bool:
+        """Whether a sample of `record` is this outcome: a failure with this error, or a success whose output has the
+        bytes `put` would store."""
+        if error is not None:
+            return any(not s["ok"] and s.get("error") == error[-4000:] for s in record["samples"])
+        written = (Path(output_file).read_bytes() if output_file is not None
+                   else (json.dumps(output, indent=1, sort_keys=True) + "\n").encode())
+        return any(s["ok"] and (self.dir / s["output"]).read_bytes() == written for s in record["samples"])
 
     @contextmanager
     def _locked(self, k: str) -> Iterator[None]:
