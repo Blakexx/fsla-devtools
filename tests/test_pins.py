@@ -1,5 +1,5 @@
-"""The shared pins (pins/*.json) are each a complete pin, and the ones that name one release agree on it: Nsight Compute is the
-component of the toolkit's manifest, and the toolkit's own component list names no Nsight Compute of its own."""
+"""The shared pins (pins/*.json) are each a complete pin, and the ones that name one release agree on it: Nsight Compute and
+Nsight Systems are components of the toolkit's manifest, and the toolkit's own component list names neither of its own."""
 from __future__ import annotations
 
 import json
@@ -8,7 +8,7 @@ from pathlib import Path
 
 PINS = Path(__file__).resolve().parents[1] / "pins"
 REQUIRED = ("name", "role", "upstream", "version", "asset_sha256", "archive_root", "binary_path")
-RELEASES = ("bazelisk", "nsight_compute", "uv")
+RELEASES = ("bazelisk", "clang_tidy", "difftastic", "hyperfine", "mold", "nsight_compute", "nsight_systems", "uv")
 
 
 def pin(name: str) -> dict:
@@ -20,7 +20,7 @@ class Pins(unittest.TestCase):
         for name in RELEASES:
             with self.subTest(name):
                 got = pin(name)
-                self.assertEqual(got["name"], name)
+                self.assertEqual(got["name"].replace("-", "_"), name)
                 self.assertTrue(got["release_url"].endswith(got["release_asset"]))
                 self.assertEqual(len(got["asset_sha256"]), 64)
                 self.assertTrue(all(key in got for key in REQUIRED))
@@ -31,9 +31,11 @@ class Pins(unittest.TestCase):
         self.assertEqual(len(toolkit["manifest_sha256"]), 64)
         self.assertEqual(len(toolkit["components"]), len(set(toolkit["components"])))
 
-    def test_nsight_compute_is_the_toolkits_manifest_release(self):
-        self.assertEqual(pin("nsight_compute")["upstream"], pin("cuda_toolkit")["manifest_url"])
-        self.assertNotIn("nsight_compute", pin("cuda_toolkit")["components"])
+    def test_nsight_is_the_toolkits_manifest_release(self):
+        for name in ("nsight_compute", "nsight_systems"):
+            with self.subTest(name):
+                self.assertEqual(pin(name)["upstream"], pin("cuda_toolkit")["manifest_url"])
+                self.assertNotIn(name, pin("cuda_toolkit")["components"])
 
 
 if __name__ == "__main__":

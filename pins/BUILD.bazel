@@ -1,13 +1,19 @@
 """The pins every FSLA workspace shares: uv and the Python it installs (an environment's `uv_pin`), the CUDA toolkit
-(`cuda_toolkit_pin`), Nsight Compute, bazelisk, and the Bazel release they are tested with (`bazel_version`). This package
+(`cuda_toolkit_pin`), Nsight Compute and Nsight Systems, bazelisk, mold, clang-tidy, hyperfine, difftastic, and the Bazel
+release they are tested with (`bazel_version`). This package
 loads nothing of this repository's own graph, so a workspace's targets can depend on its files (a test reading a pin, the
 Bazel release check)."""
 
 exports_files([
     "bazel_version",
     "bazelisk_pin.json",
+    "clang_tidy_pin.json",
     "cuda_toolkit_pin.json",
+    "difftastic_pin.json",
+    "hyperfine_pin.json",
+    "mold_pin.json",
     "nsight_compute_pin.json",
+    "nsight_systems_pin.json",
     "uv_pin.json",
 ])
 

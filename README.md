@@ -390,7 +390,7 @@ first trims the repository cache's unused downloads when a trim is due. `bazel -
 | Tag | Repository |
 |---|---|
 | `python` | a Python environment: the pinned CPython, a hash-pinned lock's packages, then packages pinned by commit and this module's `fsla_devtools`, built once a key into the machine's shared store (`fsla_devtools.graph.make_env`); `isolated_builds = False` builds the pinned packages against the environment, for one whose build imports a locked package |
-| `pinned` | a release pinned by URL and digest (uv, mold, clang-tidy, Nsight Compute), an archive a .tar.gz or a .tar.xz |
+| `pinned` | a release pinned by URL and digest (uv, mold, clang-tidy, Nsight Compute, Nsight Systems), an archive a .tar.gz or a .tar.xz |
 | `cuda_toolkit` | a CUDA toolkit from NVIDIA's redistributables, pinned by their manifest's digest (which carries each component's) |
 | `host_cc`, `host_gpu` | the host C++ compiler's and the machine's devices' identities, which actions that depend on them are keyed on |
 | `tree` | the checkout's tracked files (`git ls-files`; the commit's index under the commit gate) |
@@ -415,7 +415,11 @@ a swept environment a checkout still names is rebuilt from the cache or the inde
 | `uv_pin.json` | the uv every workspace's environment is built by, and the Python it installs |
 | `cuda_toolkit_pin.json` | the CUDA toolkit (CUDA 13.5): NVIDIA's redistributable components at the release manifest's digest, what a workspace's `cuda_toolkit` tag unpacks |
 | `nsight_compute_pin.json` | Nsight Compute, the profiler (`ncu`): the toolkit's manifest release of the component, by its archive's digest, what a workspace's `pinned` tag fetches and a developer's box installs |
+| `nsight_systems_pin.json` | Nsight Systems, the timeline profiler (`nsys`): the toolkit's manifest release of the component, by its archive's digest, what a developer's box installs |
 | `bazelisk_pin.json` | Bazel's launcher, the one tool a workspace bootstraps outside its graph |
+| `mold_pin.json` | the linker a workspace's graph links with (`@mold`, a `pinned` tag) |
+| `clang_tidy_pin.json` | the analyzer of a workspace's unit lints (`@clang_tidy`, a `pinned` tag): LLVM's clang-tidy as a wheel, its binary's digest checked |
+| `hyperfine_pin.json`, `difftastic_pin.json` | the benchmarking tool and the structural diff (`difft`) a developer's box installs |
 | `bazel_version` | the Bazel release the pins are tested with |
 
 Each workspace keeps its own `.bazelversion`; `bazel_version_test(name, version = ".bazelversion")` (`bazel/rules.bzl`) fails
