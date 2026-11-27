@@ -28,6 +28,19 @@ class Export(unittest.TestCase):
         self.assertEqual(export.runfiles_path("../r+/c.json"), "r+/c.json")
         self.assertEqual(export.runfiles_path("measure/a.py"), "_main/measure/a.py")
 
+    def test_the_environment_is_the_mark_s_venv_or_an_older_commit_s_interpreter_s(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            venv = Path(tmp) / "store" / "venvs" / "k"
+            venv.mkdir(parents=True)
+            (venv / ".complete").write_text("")
+            (Path(tmp) / "link").symlink_to(venv)
+            mark = DESCRIPTION["bundle"]["venv"]
+            self.assertEqual(export.environment(DESCRIPTION["bundle"], {mark: Path(tmp) / "link" / ".complete"}),
+                             venv.resolve())
+        #: a commit before the environments by label named the store venv's interpreter by its path
+        older = {"root": "_main", "manifest": "_main/m.json", "python": "/s/venvs/k/bin/python3"}
+        self.assertEqual(export.environment(older, {}), Path("/s/venvs/k"))
+
     def test_the_copy_is_a_copy_and_a_file_that_would_make_a_package_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp) / "a.py"

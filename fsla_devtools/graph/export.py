@@ -1,6 +1,6 @@
 """THE BUNDLE TAG'S EXPORT: another workspace's timing entries, clock readers and diff sides, built there by its own pins
 and copied here, so a workspace measures two commits in ONE session (bazel/environment.bzl's `bundle` tag runs this, on
-the machine's python3, standard library only).
+uv's pinned CPython, standard library only).
 
     python3 export.py --out REPO --cquery export.cquery (--checkout PATH | --commit SHA --remote URL
                       --store DIR) [--package PATTERN]...
@@ -101,6 +101,15 @@ def starlark(value) -> str:
     return json.dumps(value)
 
 
+def environment(bundle: dict, files: dict[str, Path]) -> Path:
+    """The store venv a description's bundle runs on: its completion mark's (`bundle.venv`, a runfiles path) resolved
+    directory -- or, for a commit older than the environments by label, the venv its `bundle.python` (the store venv's
+    interpreter, by its machine path) is in: a bundle builds an older commit by its own pins."""
+    if "venv" in bundle:
+        return Path(os.path.realpath(files[bundle["venv"]])).parent
+    return Path(bundle["python"]).parents[1]
+
+
 def exported(name: str, label: str, d: dict, tree: str, venv: str) -> str:
     """One `exported_entry` of the generated BUILD file, its paths the repository's; `venv` its environment's completion
     mark, by its path here."""
@@ -143,7 +152,7 @@ def export(checkout: Path, out: Path, *, cquery: Path, packages: list[str], comm
         label = "//" + t["label"].split("//", 1)[1]
         #: the bundle's environment: a link here to the store venv its mark resolves to, named by the venv's key, so the
         #: exported description names it by its path in this repository and never by the store's
-        venv = Path(os.path.realpath(files[d["bundle"]["venv"]])).parent
+        venv = environment(d["bundle"], files)
         link = out / "venvs" / venv.name
         if not link.is_symlink():
             link.parent.mkdir(parents=True, exist_ok=True)
