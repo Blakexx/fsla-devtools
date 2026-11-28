@@ -9,6 +9,7 @@ exports_files([
     "bazelisk_pin.json",
     "clang_tidy_pin.json",
     "cuda_toolkit_pin.json",
+    "host_toolchain_pin.json",
     "mold_pin.json",
     "nsight_compute_pin.json",
     "nsight_systems_pin.json",

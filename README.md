@@ -426,6 +426,8 @@ first trims the repository cache's unused downloads when a trim is due. `bazel -
 | `cells` | every central cell's description as a target (`@<name>//:<cell>`, a `cell` of `bazel/measure.bzl`) and every cell's fields (`@<name>//:cells.bzl`'s `CELLS`), generated from this module's registry on uv's pinned CPython (`uv`, `uv_pin`) |
 | `bundle` | another workspace's timing entries, clock readers and diff sides, built there by its own pins and copied in (`@<name>//:<target>`, `exported_entry`; `@<name>//:exports.bzl`'s `ENTRIES`): a commit (`commit`, `remote`) or a local checkout the run names (`worktree_env`), exported on uv's pinned CPython (`uv`, `uv_pin`), [above](#bundles) |
 | `docrefs` | the doc references' tool as `@<name>//:docrefs.py`, a copy of `fsla_devtools/docrefs.py` a workspace's `docrefs_test` runs ([below](#the-doc-references)) |
+| `hermetic` | the hermetic check's code as `@<name>//:check`, a copy of `fsla_devtools.hermetic` (standard library only) a workspace with no environment of this module's runs its `hermetic_test` with ([below](#the-hermetic-check)) |
+| `host_toolchain` | the host C++ toolchain a workspace that compiles C++ registers (`register_toolchains("@<name>//:toolchain")`, and nvcc's `-ccbin`): PyTorch's own -- its manylinux_2_28 builder's gcc-toolset (GCC 13) on that builder's AlmaLinux 8 sysroot (glibc 2.28) -- from `pin`'s RPMs by digest, unpacked (`fsla_devtools/graph/rpm_root.py`) on `python`, a standard-library interpreter (rules_python's `@python_<version>_host//:python`) |
 
 `python`, `pinned`, `cuda_toolkit` and `data` are REPRODUCIBLE repositories (`repo_metadata(reproducible = True)`: their result
 is fixed by their pins and the files they read), so Bazel unpacks each once into the repo contents cache
@@ -441,7 +443,9 @@ a swept environment a checkout still names is rebuilt from the cache or the inde
 <a id="the-hermetic-check"></a>**The hermetic check** (`bazel/hermetic.bzl`'s `hermetic_test`, `fsla_devtools.hermetic`):
 every tool an action runs is pinned, and the machine gives only what an allowlist names with its reason. A workspace's
 gate holds one over its gate's targets, `hermetic_test(name = "hermetic", targets = [...], venv = VENV)` (`allowlist`, a
-file of its own that extends this module's default, `bazel/hermetic.json`; `cc = True` for a workspace that compiles C++).
+file of its own that extends this module's default, `bazel/hermetic.json`; `cc = True` for a workspace that compiles C++). A workspace with no environment of this module's -- a public module
+that takes this one only as a dev dependency -- runs it on its own standard-library interpreter instead, `python =
+"@rules_python//python/bin:python", check = "@<hermetic>//:check"` (the `hermetic` tag's repository).
 An aspect reads every action under the targets -- its command line, environment, a written file's text and the
 repositories its inputs come from -- and the test refuses a machine path in any of them (`fsla_devtools.results.store`'s
 pattern), a machine tool (an absolute path under `/bin`, `/usr`, `/opt`, `/etc`, `/lib`) the allowlist's `machine`
@@ -463,6 +467,7 @@ this module for `rctx.which("<tool>")` and `rctx.execute(["<tool>", ...])`, each
 | `nsight_systems_pin.json` | Nsight Systems, the timeline profiler (`nsys`): the toolkit's manifest release of the component, by its archive's digest, what a developer's box installs |
 | `bazelisk_pin.json` | Bazel's launcher, the one tool a workspace bootstraps outside its graph |
 | `mold_pin.json` | the linker a workspace's graph links with (`@mold`, a `pinned` tag) |
+| `host_toolchain_pin.json` | the host C++ toolchain (`host_toolchain`): the AlmaLinux 8.10 RPMs of the gcc-toolset PyTorch's CUDA 13 manylinux_2_28 builder carries and of its glibc 2.28 sysroot, each by its repository's digest |
 | `clang_tidy_pin.json` | the analyzer of a workspace's unit lints (`@clang_tidy`, a `pinned` tag): LLVM's clang-tidy as a wheel, its binary's digest checked |
 | `bazel_version` | the Bazel release the pins are tested with |
 

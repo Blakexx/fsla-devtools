@@ -8,6 +8,7 @@ module(name = "fsla_devtools", version = "0.1.0")
 bazel_dep(name = "bazel_skylib", version = "1.9.2")
 #: a workspace's environment BUILD file may define C++ targets over the environment's headers (torch's, Python's): the
 #: repositories this module's extension makes see this module's dependencies
+bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "rules_cc", version = "0.2.28")
 
 #: THIS WORKSPACE'S OWN GRAPH, when fsla-devtools is the root (a dev dependency, which a workspace depending on the

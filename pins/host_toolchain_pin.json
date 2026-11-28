@@ -1,0 +1,211 @@
+{
+    "name": "host_toolchain",
+    "role": "the host C++ toolchain every FSLA workspace that compiles C++ registers (the environment extension's `host_toolchain` tag), and nvcc's host compiler (`-ccbin`): PyTorch's own -- the gcc-toolset of its manylinux_2_28 builder for CUDA 13 (`pytorch/manylinux2_28-builder:cuda13.*`, .ci/docker/manywheel/build.sh's `DEVTOOLSET_VERSION=13`) on that builder's base, AlmaLinux 8 (glibc 2.28, the floor torch's wheels need) -- the toolset and the sysroot only, never the image: the AlmaLinux 8.10 RPMs below, each by its repository's digest, unpacked into one root. The toolset's libstdc++ links the system's libstdc++.so.6 (GCC 8's, GLIBCXX_3.4.25) and the newer symbols from libstdc++_nonshared.a, so what it links loads beside torch on any glibc >= 2.28.",
+    "upstream": "https://github.com/pytorch/pytorch/blob/5baab687f6f6ade4649eb9b07ad7c8ccf1898366/.ci/docker/manywheel/build.sh (manylinux2_28-builder:cuda13*: GPU_IMAGE=amd64/almalinux:8, DEVTOOLSET_VERSION=13); .ci/docker/manywheel/Dockerfile_2_28 (gcc-toolset-${DEVTOOLSET_VERSION}-gcc, -gcc-c++)",
+    "version": "gcc-toolset-13 13.3.1-2.2.el8_10, binutils 2.40-21.el8, glibc 2.28-251.el8_10.53 (AlmaLinux 8.10)",
+    "gcc_version": "13.3.1",
+    "glibc": "2.28",
+    "toolset": "opt/rh/gcc-toolset-13/root/usr",
+    "target": "x86_64-redhat-linux",
+    "gcc_major": "13",
+    "rpms": [
+        {
+            "name": "gcc-toolset-13-gcc",
+            "file": "gcc-toolset-13-gcc-13.3.1-2.2.el8_10.x86_64.rpm",
+            "sha256": "b6680896f26484930f5195af66539746196e32fdc3eb1e9c343c82be40fd3b36",
+            "size": 48541856,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/AppStream/x86_64/os/Packages/gcc-toolset-13-gcc-13.3.1-2.2.el8_10.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/AppStream/x86_64/os/Packages/gcc-toolset-13-gcc-13.3.1-2.2.el8_10.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/AppStream/x86_64/os/Packages/gcc-toolset-13-gcc-13.3.1-2.2.el8_10.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "gcc-toolset-13-gcc-c++",
+            "file": "gcc-toolset-13-gcc-c++-13.3.1-2.2.el8_10.x86_64.rpm",
+            "sha256": "cba19230d63e1c6f220ab9b61f941ab20dfd2c9e81aed82545961cbe83ecf523",
+            "size": 14688300,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/AppStream/x86_64/os/Packages/gcc-toolset-13-gcc-c++-13.3.1-2.2.el8_10.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/AppStream/x86_64/os/Packages/gcc-toolset-13-gcc-c++-13.3.1-2.2.el8_10.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/AppStream/x86_64/os/Packages/gcc-toolset-13-gcc-c++-13.3.1-2.2.el8_10.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "gcc-toolset-13-libstdc++-devel",
+            "file": "gcc-toolset-13-libstdc++-devel-13.3.1-2.2.el8_10.x86_64.rpm",
+            "sha256": "5d0a8e7231f2d970943b6faf44c64cb1130af1f041e85966a3d9e383c6c3943f",
+            "size": 3823396,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/AppStream/x86_64/os/Packages/gcc-toolset-13-libstdc++-devel-13.3.1-2.2.el8_10.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/AppStream/x86_64/os/Packages/gcc-toolset-13-libstdc++-devel-13.3.1-2.2.el8_10.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/AppStream/x86_64/os/Packages/gcc-toolset-13-libstdc++-devel-13.3.1-2.2.el8_10.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "gcc-toolset-13-binutils",
+            "file": "gcc-toolset-13-binutils-2.40-21.el8.x86_64.rpm",
+            "sha256": "cad37a92c03fb7876fc2c36e34c77c3159447f32c294e6e2a842374e9011c5e7",
+            "size": 7389932,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/AppStream/x86_64/os/Packages/gcc-toolset-13-binutils-2.40-21.el8.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/AppStream/x86_64/os/Packages/gcc-toolset-13-binutils-2.40-21.el8.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/AppStream/x86_64/os/Packages/gcc-toolset-13-binutils-2.40-21.el8.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "glibc",
+            "file": "glibc-2.28-251.el8_10.53.x86_64.rpm",
+            "sha256": "993b42bae96b8acd34ac5204cf6b1ba130f06abd52710958d4c0316d69a4e30f",
+            "size": 2336292,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/glibc-2.28-251.el8_10.53.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/glibc-2.28-251.el8_10.53.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/glibc-2.28-251.el8_10.53.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "glibc-devel",
+            "file": "glibc-devel-2.28-251.el8_10.53.x86_64.rpm",
+            "sha256": "ea796f35ad2a8d0ebf7e0d14da441de432f60ece5304e8a7292cb4b9f1fcbe05",
+            "size": 90080,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/glibc-devel-2.28-251.el8_10.53.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/glibc-devel-2.28-251.el8_10.53.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/glibc-devel-2.28-251.el8_10.53.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "glibc-headers",
+            "file": "glibc-headers-2.28-251.el8_10.53.x86_64.rpm",
+            "sha256": "fcce5f94bda1fce3818557b6298c8375fcf6d2f13c52ceb2380bd3286cb904ad",
+            "size": 509676,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/glibc-headers-2.28-251.el8_10.53.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/glibc-headers-2.28-251.el8_10.53.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/glibc-headers-2.28-251.el8_10.53.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "kernel-headers",
+            "file": "kernel-headers-4.18.0-553.190.1.el8_10.x86_64.rpm",
+            "sha256": "72f2e37689adde795365dfee367d93b2d1748312a3510c7781df40e4e4820f62",
+            "size": 12600668,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/kernel-headers-4.18.0-553.190.1.el8_10.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/kernel-headers-4.18.0-553.190.1.el8_10.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/kernel-headers-4.18.0-553.190.1.el8_10.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "libgcc",
+            "file": "libgcc-8.5.0-31.el8_10.alma.1.x86_64.rpm",
+            "sha256": "e8b074a637599d81db4886f28899394588024e56b03c9c2f43b1e8c519d725c4",
+            "size": 83772,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/libgcc-8.5.0-31.el8_10.alma.1.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/libgcc-8.5.0-31.el8_10.alma.1.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/libgcc-8.5.0-31.el8_10.alma.1.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "libstdc++",
+            "file": "libstdc++-8.5.0-31.el8_10.alma.1.x86_64.rpm",
+            "sha256": "b41f7a2ee398970b73c3da8accf7973646b658a3ebdd0cc5f9a51e03a5f4a900",
+            "size": 485420,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/libstdc++-8.5.0-31.el8_10.alma.1.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/libstdc++-8.5.0-31.el8_10.alma.1.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/libstdc++-8.5.0-31.el8_10.alma.1.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "libmpc",
+            "file": "libmpc-1.1.0-9.1.el8.x86_64.rpm",
+            "sha256": "792b9e61af52cbbf5018114edb2a131590b5909e916920afb7a07374dbee95f7",
+            "size": 61328,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/AppStream/x86_64/os/Packages/libmpc-1.1.0-9.1.el8.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/AppStream/x86_64/os/Packages/libmpc-1.1.0-9.1.el8.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/AppStream/x86_64/os/Packages/libmpc-1.1.0-9.1.el8.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "mpfr",
+            "file": "mpfr-3.1.6-1.el8.x86_64.rpm",
+            "sha256": "d1eff9daef4ccbd399303ec893ebe4575900661b45d7c1a9113a18836f6472f4",
+            "size": 226484,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/mpfr-3.1.6-1.el8.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/mpfr-3.1.6-1.el8.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/mpfr-3.1.6-1.el8.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "gmp",
+            "file": "gmp-6.1.2-11.el8.x86_64.rpm",
+            "sha256": "472a114e6d62e63c5c0dc82773d38b37e532602662d809560d46baf55816e56c",
+            "size": 324640,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/gmp-6.1.2-11.el8.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/gmp-6.1.2-11.el8.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/gmp-6.1.2-11.el8.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "zlib",
+            "file": "zlib-1.2.11-25.el8.x86_64.rpm",
+            "sha256": "ab40e85f180a6d38ce0291408b7ef5c422250f53cb26c44399ef1a4e8622778e",
+            "size": 104728,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/zlib-1.2.11-25.el8.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/zlib-1.2.11-25.el8.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/zlib-1.2.11-25.el8.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "libzstd",
+            "file": "libzstd-1.4.4-1.el8.x86_64.rpm",
+            "sha256": "d18b0c7ee8d94ab7d800bf21485073fc474ed61753e3cd96c981e1e89dc235de",
+            "size": 271908,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/libzstd-1.4.4-1.el8.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/libzstd-1.4.4-1.el8.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/libzstd-1.4.4-1.el8.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "jansson",
+            "file": "jansson-2.14-1.el8.x86_64.rpm",
+            "sha256": "43473522bff88d30d1adc8776cb26b9bd1b3bf4ecd1a00ae9f659c7c0e68f81d",
+            "size": 47440,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/jansson-2.14-1.el8.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/jansson-2.14-1.el8.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/jansson-2.14-1.el8.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "libxcrypt",
+            "file": "libxcrypt-4.1.1-6.el8.x86_64.rpm",
+            "sha256": "d47f375a7902f3059a8690edc5949bbfd4708d53762c53414ff8747b7b409809",
+            "size": 73404,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/libxcrypt-4.1.1-6.el8.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/libxcrypt-4.1.1-6.el8.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/libxcrypt-4.1.1-6.el8.x86_64.rpm"
+            ]
+        },
+        {
+            "name": "libxcrypt-devel",
+            "file": "libxcrypt-devel-4.1.1-6.el8.x86_64.rpm",
+            "sha256": "c370e6338926c45830f0451be2666da2a2aafca18468d2a30304fc8f20736798",
+            "size": 24732,
+            "urls": [
+                "https://repo.almalinux.org/almalinux/8.10/BaseOS/x86_64/os/Packages/libxcrypt-devel-4.1.1-6.el8.x86_64.rpm",
+                "https://mirrors.kernel.org/almalinux/8.10/BaseOS/x86_64/os/Packages/libxcrypt-devel-4.1.1-6.el8.x86_64.rpm",
+                "https://mirror.rackspace.com/almalinux/8.10/BaseOS/x86_64/os/Packages/libxcrypt-devel-4.1.1-6.el8.x86_64.rpm"
+            ]
+        }
+    ]
+}

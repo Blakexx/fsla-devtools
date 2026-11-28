@@ -1,5 +1,6 @@
-"""The environment's store builder, which the environment extension runs (bazel/environment.bzl), and the bundle tag's
-export of another workspace's entries (export.py, export.cquery)."""
+"""The environment's store builder, which the environment extension runs (bazel/environment.bzl), the bundle tag's
+export of another workspace's entries (export.py, export.cquery), and the host C++ toolchain's root, unpacked from its
+RPMs (rpm_root.py, the `host_toolchain` tag)."""
 
 load("//bazel:workspace.bzl", "tree_part")
 
@@ -7,6 +8,7 @@ exports_files([
     "export.cquery",
     "export.py",
     "make_env.py",
+    "rpm_root.py",
 ])
 
 tree_part()
